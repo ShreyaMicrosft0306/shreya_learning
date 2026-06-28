@@ -18,13 +18,6 @@ Write a function that returns the minimum number of minutes that must elapse
 until no cell has a fresh orange. If it is impossible to rot every fresh 
 orange, return -1.
 
-INPUT:
-- grid: string[][] - m x n grid with "E", "F", or "R"
-- m, n: 1 <= m, n <= 10
-- grid[i][j] is "E", "F", or "R"
-
-OUTPUT:
-- int - Minimum minutes to rot all oranges, or -1 if impossible
 
 EXAMPLES:
 Example 1:
@@ -33,13 +26,6 @@ Input: grid = [
     ["F", "F"]
 ]
 Output: 2
-Explanation:
-- Minute 0: R F    (1 rotten, 3 fresh)
-            F F
-- Minute 1: R R    (3 rotten, 1 fresh)
-            R F
-- Minute 2: R R    (4 rotten, 0 fresh)
-            R R
 
 Example 2:
 Input: grid = [

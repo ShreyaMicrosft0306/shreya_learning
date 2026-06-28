@@ -2,7 +2,7 @@
  * Problem: Longest Substring Without Repeating Characters
  * 
  * Given a string s, find the length of the longest substring without repeating characters.
- * 
+ * eabcabecbb
  * Example 1:
  * Input: s = "abcabcbb"
  * Output: 3
