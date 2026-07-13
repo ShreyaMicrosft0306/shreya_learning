@@ -11,6 +11,71 @@ A region of 'O' is surrounded by 'X' if there is no adjacent path (cells that
 border each other in the N, W, E, S directions) consisting of only 'O' from 
 anywhere inside that region to the border of the board.
 
+EXAMPLES:
+Example 1: Simple Surrounded Cluster
+Input:
+[
+  ['X','X','X','X','X'],
+  ['X','O','O','O','X'],
+  ['X','O','X','O','X'],
+  ['X','O','O','O','X'],
+  ['X','X','X','X','X']
+]
+Output:
+[
+  ['X','X','X','X','X'],
+  ['X','X','X','X','X'],
+  ['X','X','X','X','X'],
+  ['X','X','X','X','X'],
+  ['X','X','X','X','X']
+]
+Explanation: All O's are completely surrounded by X's (not touching borders).
+Therefore, ALL O's flip to X.
+
+Example 2: Multiple Isolated Clusters
+Input:
+[
+  ['X','X','X','X','X','X','X'],
+  ['X','O','O','X','X','X','X'],
+  ['X','O','O','X','X','X','X'],
+  ['X','X','X','X','O','O','X'],
+  ['X','X','X','X','O','O','X'],
+  ['X','X','X','X','X','X','X']
+]
+Output:
+[
+  ['X','X','X','X','X','X','X'],
+  ['X','X','X','X','X','X','X'],
+  ['X','X','X','X','X','X','X'],
+  ['X','X','X','X','X','X','X'],
+  ['X','X','X','X','X','X','X'],
+  ['X','X','X','X','X','X','X']
+]
+Explanation: Two separate clusters of O's, both surrounded by X's.
+Both clusters flip to X.
+
+Example 3: Mixed - Surrounded vs Border-Connected
+Input:
+[
+  ['X','X','X','X','X','X'],
+  ['X','O','O','X','O','X'],
+  ['X','O','X','X','O','X'],
+  ['X','X','X','X','O','O']
+]
+Output:
+[
+  ['X','X','X','X','X','X'],
+  ['X','X','X','X','O','X'],
+  ['X','X','X','X','O','X'],
+  ['X','X','X','X','O','O']
+]
+Explanation: 
+- LEFT cluster at [1-2, 1-2]: Isolated from border → FLIP to X
+- RIGHT cluster at [1-3, 4-5]: Connected to border O at [3,5] → KEEP as O
+One border O protects the entire connected chain!
+
+Example 4: Original Problem Example
+Input:
 [
   ['X','X','X','X','O'],
   ['X','X','O','X','X'],
@@ -18,7 +83,7 @@ anywhere inside that region to the border of the board.
   ['X','O','X','X','X'],
   ['X','O','X','X','X']
 ]
-Sample Output
+Output:
 [
   ['X','X','X','X','O'],
   ['X','X','X','X','X'],
@@ -26,6 +91,10 @@ Sample Output
   ['X','O','X','X','X'],
   ['X','O','X','X','X']
 ]
+Explanation:
+- O's at [0,4] and [2,4]: Touch RIGHT border → KEEP
+- O's at [3,1] and [4,1]: Touch LEFT border → KEEP
+- O at [1,2]: Isolated, no border connection → FLIP to X
 
 CONSTRAINTS:
 - m == grid.length
@@ -195,87 +264,211 @@ namespace DSA_CSharp.Graphs
         {
             var solution = new SurroundedRegions();
             
-            // Test case 1
+            Console.WriteLine("═══════════════════════════════════════════════════════");
+            Console.WriteLine("SURROUNDED REGIONS - VISUAL EXAMPLES");
+            Console.WriteLine("═══════════════════════════════════════════════════════\n");
+            
+            // Test case 1: Simple surrounded region
             char[][] grid1 = new char[][]
             {
-                new char[] {'X','X','X','X'},
-                new char[] {'X','O','O','X'},
-                new char[] {'X','X','O','X'},
-                new char[] {'X','O','X','X'}
+                new char[] {'X','X','X','X','X'},
+                new char[] {'X','O','O','O','X'},
+                new char[] {'X','O','X','O','X'},
+                new char[] {'X','O','O','O','X'},
+                new char[] {'X','X','X','X','X'}
             };
             
-            Console.WriteLine("Test Case 1:");
+            Console.WriteLine("Test Case 1: SIMPLE SURROUNDED CLUSTER");
+            Console.WriteLine("─────────────────────────────────────────────────────");
             Console.WriteLine("Input:");
             solution.PrintGrid(grid1);
+            Console.WriteLine("\nAnalysis:");
+            Console.WriteLine("• All O's are INSIDE the border (not touching edges)");
+            Console.WriteLine("• Completely surrounded by X's");
+            Console.WriteLine("• Result: ALL O's should flip to X ✗");
             solution.Solve(grid1);
             Console.WriteLine("\nOutput:");
             solution.PrintGrid(grid1);
-            Console.WriteLine("\nExpected: Center O's flipped to X, bottom O kept\n");
+            Console.WriteLine("Expected: All O's → X (completely surrounded)\n");
             
-            // Test case 2: More complex
+            // Test case 2: Multiple isolated clusters
             char[][] grid2 = new char[][]
+            {
+                new char[] {'X','X','X','X','X','X','X'},
+                new char[] {'X','O','O','X','X','X','X'},
+                new char[] {'X','O','O','X','X','X','X'},
+                new char[] {'X','X','X','X','O','O','X'},
+                new char[] {'X','X','X','X','O','O','X'},
+                new char[] {'X','X','X','X','X','X','X'}
+            };
+            
+            Console.WriteLine("\nTest Case 2: MULTIPLE ISOLATED CLUSTERS");
+            Console.WriteLine("─────────────────────────────────────────────────────");
+            Console.WriteLine("Input:");
+            solution.PrintGrid(grid2);
+            Console.WriteLine("\nAnalysis:");
+            Console.WriteLine("• Cluster 1: O's at [1-2, 1-2] - surrounded");
+            Console.WriteLine("• Cluster 2: O's at [3-4, 4-5] - surrounded");
+            Console.WriteLine("• Both clusters isolated from borders");
+            Console.WriteLine("• Result: BOTH clusters flip to X ✗");
+            solution.Solve(grid2);
+            Console.WriteLine("\nOutput:");
+            solution.PrintGrid(grid2);
+            Console.WriteLine("Expected: All O's → X (both clusters surrounded)\n");
+            
+            // Test case 3: One surrounded, one connected to border
+            char[][] grid3 = new char[][]
+            {
+                new char[] {'X','X','X','X','X','X'},
+                new char[] {'X','O','O','X','O','X'},
+                new char[] {'X','O','X','X','O','X'},
+                new char[] {'X','X','X','X','O','O'},  // Right cluster touches border
+                new char[] {'X','X','X','X','X','X'}
+            };
+            
+            Console.WriteLine("\nTest Case 3: MIXED - SURROUNDED vs BORDER-CONNECTED");
+            Console.WriteLine("─────────────────────────────────────────────────────");
+            Console.WriteLine("Input:");
+            solution.PrintGrid(grid3);
+            Console.WriteLine("\nAnalysis:");
+            Console.WriteLine("• LEFT cluster [1-2, 1]: Isolated → FLIP ✗");
+            Console.WriteLine("• RIGHT cluster [1-3, 4-5]: Touches border at [3,5] → KEEP ✓");
+            Console.WriteLine("• Border O protects entire connected region!");
+            solution.Solve(grid3);
+            Console.WriteLine("\nOutput:");
+            solution.PrintGrid(grid3);
+            Console.WriteLine("Expected: Left O's → X, Right O's → Keep as O\n");
+            
+            // Test case 4: Complex pattern - donut shape
+            char[][] grid4 = new char[][]
+            {
+                new char[] {'X','X','X','X','X','X','X'},
+                new char[] {'X','O','O','O','O','O','X'},
+                new char[] {'X','O','X','X','X','O','X'},
+                new char[] {'X','O','X','O','X','O','X'},  // Inner O surrounded
+                new char[] {'X','O','X','X','X','O','X'},
+                new char[] {'X','O','O','O','O','O','X'},
+                new char[] {'X','X','X','X','X','X','X'}
+            };
+            
+            Console.WriteLine("\nTest Case 4: DONUT PATTERN (Nested Regions)");
+            Console.WriteLine("─────────────────────────────────────────────────────");
+            Console.WriteLine("Input:");
+            solution.PrintGrid(grid4);
+            Console.WriteLine("\nAnalysis:");
+            Console.WriteLine("• OUTER ring of O's: Isolated from border → FLIP ✗");
+            Console.WriteLine("• INNER O at [3,3]: Surrounded by X's → FLIP ✗");
+            Console.WriteLine("• Even complex patterns follow same rule!");
+            solution.Solve(grid4);
+            Console.WriteLine("\nOutput:");
+            solution.PrintGrid(grid4);
+            Console.WriteLine("Expected: ALL O's → X (outer ring and inner O both surrounded)\n");
+            
+            // Test case 5: Diagonal pattern (not connected diagonally!)
+            char[][] grid5 = new char[][]
+            {
+                new char[] {'X','X','X','X','X'},
+                new char[] {'X','O','X','X','X'},
+                new char[] {'X','X','O','X','X'},
+                new char[] {'X','X','X','O','X'},
+                new char[] {'X','X','X','X','X'}
+            };
+            
+            Console.WriteLine("\nTest Case 5: DIAGONAL PATTERN (Not Connected!)");
+            Console.WriteLine("─────────────────────────────────────────────────────");
+            Console.WriteLine("Input:");
+            solution.PrintGrid(grid5);
+            Console.WriteLine("\nAnalysis:");
+            Console.WriteLine("• O's appear on diagonal: [1,1], [2,2], [3,3]");
+            Console.WriteLine("• IMPORTANT: Only 4-directional connections count!");
+            Console.WriteLine("• Diagonal cells are NOT connected");
+            Console.WriteLine("• Each O is isolated → ALL flip ✗");
+            solution.Solve(grid5);
+            Console.WriteLine("\nOutput:");
+            solution.PrintGrid(grid5);
+            Console.WriteLine("Expected: All O's → X (diagonal ≠ connected)\n");
+            
+            // Test case 6: Border connection saves entire region
+            char[][] grid6 = new char[][]
+            {
+                new char[] {'O','X','X','X','X'},
+                new char[] {'O','O','O','O','X'},
+                new char[] {'X','O','X','O','X'},
+                new char[] {'X','O','O','O','X'},
+                new char[] {'X','X','X','X','X'}
+            };
+            
+            Console.WriteLine("\nTest Case 6: BORDER CONNECTION SAVES ALL");
+            Console.WriteLine("─────────────────────────────────────────────────────");
+            Console.WriteLine("Input:");
+            solution.PrintGrid(grid6);
+            Console.WriteLine("\nAnalysis:");
+            Console.WriteLine("• O at [0,0] touches TOP border → Safe! ✓");
+            Console.WriteLine("• Entire chain of connected O's is safe:");
+            Console.WriteLine("  [0,0]→[1,0]→[1,1]→[1,2]→[1,3]→[2,1]→[2,3]→[3,1]→[3,2]→[3,3]");
+            Console.WriteLine("• ONE border connection protects ENTIRE region!");
+            solution.Solve(grid6);
+            Console.WriteLine("\nOutput:");
+            solution.PrintGrid(grid6);
+            Console.WriteLine("Expected: ALL O's kept (connected to border)\n");
+            
+            // Test case 7: Example from problem description
+            char[][] grid7 = new char[][]
             {
                 new char[] {'X','X','X','X','O'},
                 new char[] {'X','X','O','X','X'},
-                new char[] {'X','X','O','X','O'},
+                new char[] {'X','X','X','X','O'},
                 new char[] {'X','O','X','X','X'},
                 new char[] {'X','O','X','X','X'}
             };
             
-            Console.WriteLine("Test Case 2:");
+            Console.WriteLine("\nTest Case 7: PROBLEM EXAMPLE");
+            Console.WriteLine("─────────────────────────────────────────────────────");
             Console.WriteLine("Input:");
-            solution.PrintGrid(grid2);
-            solution.Solve(grid2);
+            solution.PrintGrid(grid7);
+            Console.WriteLine("\nAnalysis:");
+            Console.WriteLine("• RIGHT border O's at [0,4] and [2,4]: Touch RIGHT edge → Safe ✓");
+            Console.WriteLine("• LEFT border O's at [3,1] and [4,1]: Touch LEFT edge → Safe ✓");
+            Console.WriteLine("• CENTER O at [1,2]: Isolated, no border connection → FLIP ✗");
+            Console.WriteLine("• Border O's protect themselves, but NOT the center O!");
+            solution.Solve(grid7);
             Console.WriteLine("\nOutput:");
-            solution.PrintGrid(grid2);
-            Console.WriteLine("\nExpected: Center O's at [1,2] and [2,2] flipped, border O's kept\n");
+            solution.PrintGrid(grid7);
+            Console.WriteLine("Expected: Center O → X, Border O's stay\n");
             
-            // Test case 3: All O's connected to border
-            char[][] grid3 = new char[][]
+            // Test case 8: Large surrounded cluster
+            char[][] grid8 = new char[][]
             {
-                new char[] {'O','O','O'},
-                new char[] {'O','O','O'},
-                new char[] {'O','O','O'}
+                new char[] {'X','X','X','X','X','X','X','X'},
+                new char[] {'X','O','O','O','O','O','O','X'},
+                new char[] {'X','O','O','O','O','O','O','X'},
+                new char[] {'X','O','O','O','O','O','O','X'},
+                new char[] {'X','X','X','X','X','X','X','X'}
             };
             
-            Console.WriteLine("Test Case 3 (All O's):");
+            Console.WriteLine("\nTest Case 8: LARGE SURROUNDED CLUSTER");
+            Console.WriteLine("─────────────────────────────────────────────────────");
             Console.WriteLine("Input:");
-            solution.PrintGrid(grid3);
-            solution.Solve(grid3);
+            solution.PrintGrid(grid8);
+            Console.WriteLine("\nAnalysis:");
+            Console.WriteLine("• 18 O's forming a large rectangle");
+            Console.WriteLine("• ALL are inside the border (rows 1-3, cols 1-6)");
+            Console.WriteLine("• Size doesn't matter - still surrounded!");
+            Console.WriteLine("• Result: ALL O's flip to X ✗");
+            solution.Solve(grid8);
             Console.WriteLine("\nOutput:");
-            solution.PrintGrid(grid3);
-            Console.WriteLine("\nExpected: No change (all O's touch border)\n");
+            solution.PrintGrid(grid8);
+            Console.WriteLine("Expected: Entire O cluster → X\n");
             
-            // Test case 4: Single surrounded O
-            char[][] grid4 = new char[][]
-            {
-                new char[] {'X','X','X'},
-                new char[] {'X','O','X'},
-                new char[] {'X','X','X'}
-            };
-            
-            Console.WriteLine("Test Case 4 (Surrounded O):");
-            Console.WriteLine("Input:");
-            solution.PrintGrid(grid4);
-            solution.Solve(grid4);
-            Console.WriteLine("\nOutput:");
-            solution.PrintGrid(grid4);
-            Console.WriteLine("\nExpected: Center O flipped to X\n");
-            
-            // Test case 5: No O's
-            char[][] grid5 = new char[][]
-            {
-                new char[] {'X','X'},
-                new char[] {'X','X'}
-            };
-            
-            Console.WriteLine("Test Case 5 (No O's):");
-            Console.WriteLine("Input:");
-            solution.PrintGrid(grid5);
-            solution.Solve(grid5);
-            Console.WriteLine("\nOutput:");
-            solution.PrintGrid(grid5);
-            Console.WriteLine("\nExpected: No change\n");
+            Console.WriteLine("═══════════════════════════════════════════════════════");
+            Console.WriteLine("KEY TAKEAWAYS:");
+            Console.WriteLine("═══════════════════════════════════════════════════════");
+            Console.WriteLine("✓ BORDER O = Safe (never flipped)");
+            Console.WriteLine("✓ O connected to border O = Safe (entire chain protected)");
+            Console.WriteLine("✗ O NOT connected to any border = Flipped to X");
+            Console.WriteLine("✓ Connection = 4-directional only (N, S, E, W)");
+            Console.WriteLine("✗ Diagonal cells are NOT connected");
+            Console.WriteLine("✓ Use REVERSE thinking: mark safe O's first, flip rest");
         }
     }
 }
