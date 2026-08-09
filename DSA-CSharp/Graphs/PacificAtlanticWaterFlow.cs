@@ -28,6 +28,18 @@ OUTPUT:
 - List<List<int>> - List of coordinates [row, col] that can reach both oceans
 
 EXAMPLES:
+Example:
+grid = [
+    [1, 2, 3],
+    [4, 5, 6],
+    [7, 8, 9]
+]
+
+Output:
+[
+    [0, 2],[1, 2],  [2, 0],[2, 1], [2, 2]
+] 
+
 Example 1:
 Input: heights = [[1,2,2,3,5],
                   [1,2,3,4,4],
