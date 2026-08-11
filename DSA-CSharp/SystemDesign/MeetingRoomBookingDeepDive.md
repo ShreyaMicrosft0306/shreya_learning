@@ -160,6 +160,14 @@ Naive approach: Check every possible time slot → O(n) where n = minutes in a d
 - Updating a series should be fast
 - Need to handle exceptions (skip one occurrence, modify another)
 
+### Edge case for conflict checking
+Series A:
+Every first Monday, 2 PM - 3 PM
+
+Series B:
+Every second Monday, 2:30 PM - 3:30 PM
+
+
 ### Solution 1: Series-Based Model with Exceptions
 
 **Data Model:**
@@ -297,7 +305,7 @@ Daylight saving time changes: Meeting time might shift!
 ## Deep Dive #5: Scalability and Performance Optimization
 
 ### Question
-**Your system now handles 10,000 rooms across 100 office locations with millions of bookings per day. How would you architect the system for scalability? What are the bottlenecks?**
+**Your system now handles 10,000 rooms across 100 office locations with millions of bookings per day.How would you check the conflicts and make sure latency is less. How would you architect the system for scalability? What are the bottlenecks?**
 
 ### The Problem
 - Single database can't handle the write load
