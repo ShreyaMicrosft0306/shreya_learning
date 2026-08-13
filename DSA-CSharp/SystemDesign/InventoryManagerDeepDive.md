@@ -445,551 +445,7 @@ Use **Solution 2 (TTL-Based)** as baseline for all queries. Add **Solution 1 (LR
 
 ---
 
-## Deep Dive #4: Stock Reservations, Holds, and Pre-Allocation
-
-### Question
-
-**How would you support reserving stock for an order that hasn't been paid yet? What if a customer abandons their cart after 30 minutes?**
-
-### The Problem
-
-```
-Scenario 1:
-Customer A adds 10 units to cart (should this reduce available stock?)
-Customer B tries to buy the same 10 units
-Should Customer B's purchase be blocked, or should only paid orders hold stock?
-
-Scenario 2:
-Customer A reserves 10 units
-Customer A abandons cart after 30 minutes
-Should the stock automatically become available again?
-```
-
-### Solution 1: Soft Reservations (Logical Holds, Not Real Deductions)
-
-**How it works internally:**
-
-1. Create a `StockReservation` table:
-
-```text
-ReservationId, ProductId, Quantity, CustomerId, ExpiresAt, Status
-RES-001,       PROD-1,    10,       CUST-A,     2026-08-13 10:30, ACTIVE
-```
-
-2. Available stock calculation:
-
-```text
-AvailableStock = TotalStock - SUM(ReservedQuantity)
-```
-
-3. Expiration handled by:
-   - Background job checks expired reservations every 5 minutes
-   - Deletes expired reservations
-   - Available stock auto-increases
-
-**Pros:**
-- Flexible hold periods
-- Doesn't mutate actual inventory until payment
-- Easy to extend or cancel
-
-**Cons:**
-- Need background job to clean up
-- Another table to query
-- "Available" becomes calculated rather than stored
-
-### Solution 2: Hard Reservations (Immediate Stock Deduction)
-
-**How it works internally:**
-
-1. When customer adds to cart:
-   - Remove from inventory immediately
-   - Store in `CartItems` or `Order` table with status PENDING
-2. On payment:
-   - Status changes to CONFIRMED
-   - Stock remains removed
-3. On cart abandonment:
-   - Status changes to CANCELLED
-   - Stock is returned via `add_stock`
-
-**Pros:**
-- Inventory reflects true availability
-- Simple logic: inventory is what you see
-- No "surprise" oversells
-
-**Cons:**
-- Stock is locked up even if customer abandons cart
-- Requires cleanup job or timeout monitoring
-- Customer experience: see "sold out" if others add to cart first
-
-### Solution 3: Hybrid: Tiered Availability
-
-**How it works internally:**
-
-1. Track three tiers:
-
-```text
-TotalStock = 100
-ReservedForOrder = 30        (paid and confirmed)
-ReservedForCart = 40         (in abandoned carts, expires in 30 min)
-AvailableForNewOrders = 30   (TotalStock - ReservedForOrder - ReservedForCart)
-```
-
-2. When checking availability:
-   - Customers see "AvailableForNewOrders"
-   - Reserved stock is hidden but allocated
-3. On abandon:
-   - ReservedForCart decreases
-   - AvailableForNewOrders increases
-
-**Pros:**
-- Customers see realistic availability
-- Reserved stock is isolated from available
-- Clear separation of concerns
-
-**Cons:**
-- More complex tracking
-- More queries to calculate tiers
-
-### Recommendation
-
-Use **Solution 1 (Soft Reservations)** for simple systems where cart abandonment is common. Use **Solution 2 (Hard Reservations)** for inventory-constrained systems (e.g., tickets, limited runs). Use **Solution 3 (Hybrid)** for high-volume, mixed-urgency scenarios.
-
----
-
-## Deep Dive #5: Multi-Warehouse Inventory Distribution
-
-### Question
-
-**How would you manage inventory across 50 warehouses? How do you route an order to the nearest warehouse with stock?**
-
-### The Problem
-
-```
-Product PROD-1:
-Warehouse US-East: 100 units
-Warehouse US-West: 50 units
-Warehouse EU-Central: 75 units
-
-Customer in New York orders 30 units.
-Which warehouse should fulfill?
-```
-
-Options:
-1. Always use US-East (closest)
-2. Use whichever has stock
-3. Balance across warehouses
-4. Reserve from nearest, fallback to furthest
-
-### Solution 1: Centralized Inventory (All in One Warehouse)
-
-**How it works internally:**
-
-1. Single global stock count
-2. Warehouse fulfillment is a separate routing layer
-3. On order: pick warehouse based on:
-   - Geographic proximity to customer
-   - Warehouse utilization
-   - Shipping cost
-
-**Pros:**
-- Simple stock tracking
-- Flexible fulfillment routing
-
-**Cons:**
-- No local inventory resilience
-- Network delays to central database
-
-### Solution 2: Distributed Inventory (Per-Warehouse Tracking)
-
-**How it works internally:**
-
-1. Each warehouse maintains its own inventory:
-
-```text
-InventoryByWarehouse
-  Warehouse, ProductId, Stock
-  US-East,   PROD-1,    100
-  US-West,   PROD-1,    50
-  EU-Central,PROD-1,    75
-```
-
-2. On order:
-   - Find nearest warehouse with stock
-   - Deduct from that warehouse
-   - If nearest is empty, try next closest
-   - Fallback to furthest if needed
-
-3. Rebalancing job periodically redistributes stock:
-   - Move from over-stocked to under-stocked warehouses
-   - Minimize long-term transit costs
-
-**Pros:**
-- Local resilience (one warehouse outage doesn't block all orders)
-- Faster fulfillment (local warehouse)
-- Independent scaling per warehouse
-
-**Cons:**
-- More complex queries (check multiple tables)
-- Rebalancing overhead
-- Risk of uneven distribution
-
-### Solution 3: Hierarchical Inventory (Hub-and-Spoke)
-
-**How it works internally:**
-
-1. Structure:
-
-```text
-Central Hub
-  ├── Regional Hub (US)
-  │     ├── Warehouse US-East
-  │     ├── Warehouse US-West
-  └── Regional Hub (EU)
-        ├── Warehouse EU-Central
-```
-
-2. Stock flows:
-   - Central Hub knows aggregate stock
-   - Regional Hubs know regional availability
-   - Local warehouses know local inventory
-3. Query routing:
-   - First check local warehouse
-   - If empty, check regional hub cache
-   - If still empty, check central hub
-
-**Pros:**
-- Balances locality and global visibility
-- Reduces cross-warehouse lookups
-- Hierarchical resilience
-
-**Cons:**
-- Cache inconsistency (hub and warehouse out of sync)
-- More complex rebalancing
-
-### Solution 4: Event-Driven Inventory Sync (Eventually Consistent)
-
-**How it works internally:**
-
-1. Each warehouse operates independently with local stock
-2. On stock change, publish event: `StockChanged(Warehouse, ProductId, NewQuantity)`
-3. Central inventory service subscribes and maintains aggregate view
-4. On order, central service suggests warehouse but doesn't enforce:
-   - Warehouse confirms stock availability
-   - If warehouse is out, customer is rerouted
-5. Eventual consistency: central view lags by ~1-5 seconds
-
-**Pros:**
-- Highly resilient (warehouses work even if central is down)
-- Scalable (no single bottleneck)
-- Works well for distributed teams
-
-**Cons:**
-- Possible double-sells during sync delay
-- Requires conflict resolution (which warehouse fulfills if multiple have stock)
-- More infrastructure (message queue, event bus)
-
-### Recommendation
-
-Use **Solution 2 (Distributed Inventory)** for systems with 10-50 warehouses and predictable demand. Add **Solution 3 (Hierarchical)** for complex supply chains. Use **Solution 4 (Event-Driven)** for global, autonomous warehouse networks.
-
----
-
-## Deep Dive #6: Automated Stock Reorder and Predictive Restocking
-
-### Question
-
-**How would you automatically reorder stock when it drops below a threshold? How do you predict demand and avoid both stockouts and overstock?**
-
-### The Problem
-
-```
-Product PROD-1:
-Current stock: 8 units
-Reorder threshold: 20 units
-Daily demand: ~5 units (avg)
-Supplier lead time: 7 days
-
-If we order when stock hits 20, we may over-order.
-If we order at 10, we may run out before delivery.
-What's the optimal reorder point and quantity?
-```
-
-### Solution 1: Fixed Reorder Point (Simple, No Prediction)
-
-**How it works internally:**
-
-1. Define reorder point and reorder quantity (static):
-
-```text
-ReorderPoint = 50 units
-ReorderQuantity = 200 units
-```
-
-2. Background job every hour:
-   - Check current stock
-   - If stock <= ReorderPoint, create a `PurchaseOrder`
-3. Stop reordering if an open PO already exists for the product
-
-**Pros:**
-- Simple to implement
-- Works for stable demand
-
-**Cons:**
-- No demand forecasting
-- Leads to overstock in low-demand periods
-- Stockouts in high-demand periods
-
-### Solution 2: Demand-Based Reorder Point (Time-Series Analysis)
-
-**How it works internally:**
-
-1. Track historical demand:
-
-```text
-StockHistory table with daily/hourly removals
-ProductId, Date, QuantityRemoved
-PROD-1,    2026-08-01, 50
-PROD-1,    2026-08-02, 48
-PROD-1,    2026-08-03, 52
-```
-
-2. Calculate:
-   - Average daily demand (last 30 days)
-   - Standard deviation
-   - Seasonal trends (higher on weekends, etc)
-
-3. Reorder point formula:
-
-```text
-ReorderPoint = (AvgDailyDemand × SupplierLeadTime) + SafetyStock
-SafetyStock = StdDev × Z-score (e.g., Z=2 for 95% confidence)
-
-Example:
-AvgDailyDemand = 50 units
-SupplierLeadTime = 7 days
-StdDev = 10 units
-SafetyStock = 10 × 2 = 20 units
-ReorderPoint = (50 × 7) + 20 = 370 units
-```
-
-4. Reorder quantity based on economic order quantity (EOQ):
-
-```text
-EOQ = sqrt((2 × D × S) / H)
-D = annual demand
-S = order cost
-H = holding cost per unit per year
-```
-
-**Pros:**
-- Accounts for demand variability
-- Reduces overstock
-- Reduces stockout risk
-
-**Cons:**
-- Requires historical data (warm-up period)
-- Doesn't handle sudden demand spikes
-- Forecasting can be wrong
-
-### Solution 3: Dynamic Reorder with Real-Time Predictions
-
-**How it works internally:**
-
-1. Use machine learning or statistical model to predict demand for next week
-2. Update reorder point daily:
-
-```text
-PredictedDemand (next 7 days) = ML_model(historical_data, seasonality, events)
-ReorderPoint = (PredictedDemand) + SafetyStock
-```
-
-3. Trigger reorder when:
-   - Stock <= ReorderPoint OR
-   - Stock + AvailablePOs < MinimumSafetyLevel
-
-4. Reorder quantity:
-   - If demand is rising, order more
-   - If demand is falling, order less
-
-**Pros:**
-- Adapts to demand changes
-- Reduces stockout risk without over-ordering
-- Accounts for events (sales, holidays)
-
-**Cons:**
-- Requires ML infrastructure
-- Model accuracy matters
-- Can be expensive to train
-
-### Solution 4: Multi-Supplier with Diversified Lead Times
-
-**How it works internally:**
-
-1. Define multiple suppliers per product:
-
-```text
-SupplierA: LeadTime=7 days, CostPerUnit=$1.50, MinOrder=100
-SupplierB: LeadTime=3 days, CostPerUnit=$1.80, MinOrder=50
-SupplierC: LeadTime=14 days, CostPerUnit=$1.20, MinOrder=200
-```
-
-2. On reorder decision:
-   - If stock is critical (< SafetyStock), use SupplierB (fast, expensive)
-   - If stock is low but not critical, use SupplierA (balanced)
-   - If stock is falling slowly, use SupplierC (cheap, slow)
-
-3. Blend orders across suppliers to minimize total cost:
-
-```text
-TotalCost = (UnitCost × Quantity) + OrderingCost + HoldingCost
-```
-
-**Pros:**
-- Risk mitigation (supplier outage doesn't stop orders)
-- Cost optimization (use slow supplier when time allows)
-- Flexibility in lead times
-
-**Cons:**
-- Complex supplier management
-- Coordination overhead
-- May require dual-sourcing contracts
-
-### Recommendation
-
-Use **Solution 1 (Fixed Reorder)** for stable, high-volume products. Add **Solution 2 (Demand-Based)** for seasonal or variable products. Use **Solution 3 (ML Predictions)** for mission-critical inventory. Use **Solution 4 (Multi-Supplier)** for supply-chain resilience.
-
----
-
-## Deep Dive #7: Handling Backorders and Partial Fulfillment
-
-### Question
-
-**What happens when a customer orders 100 units but only 60 are available? Do you allow backorders, split shipments, or reject the order?**
-
-### The Problem
-
-```
-Order: 100 units
-Available: 60 units
-
-Options:
-1. Reject order (customer goes elsewhere)
-2. Fulfill partially, ship 60 now, backorder 40 for later
-3. Hold order until all 100 are available (customer waits)
-4. Auto-notify customer and ask preference
-```
-
-### Solution 1: No Backorders (All or Nothing)
-
-**How it works internally:**
-
-1. On order:
-   - Check if `Stock >= OrderQuantity`
-   - If yes, deduct and ship
-   - If no, reject with "out of stock"
-
-**Pros:**
-- Simple logic
-- No partial shipments
-- Inventory is clean
-
-**Cons:**
-- Lost sales
-- Poor customer experience
-- Competitors benefit
-
-### Solution 2: Full Backorders (Hold Until Complete)
-
-**How it works internally:**
-
-1. Create `BackorderQueue` table:
-
-```text
-BackorderID, ProductId, CustomerId, Quantity, OrderDate, Status
-BO-001,      PROD-1,    CUST-A,     40,       2026-08-13, PENDING
-```
-
-2. When stock is replenished:
-   - Check backorder queue (FIFO)
-   - Allocate new stock to oldest backorder first
-   - Ship and mark as FULFILLED
-   - If still short, wait for next replenishment
-
-**Pros:**
-- No lost sales
-- FIFO fairness
-
-**Cons:**
-- Customers wait (some abandon orders)
-- Requires backorder management system
-- Cash flow impact (money collected but goods not shipped)
-
-### Solution 3: Partial Fulfillment with Split Shipments
-
-**How it works internally:**
-
-1. On order:
-   - Fulfill available stock immediately (Shipment 1)
-   - Create backorder for remainder (Shipment 2)
-   - Notify customer of split shipment plan
-
-2. Inventory tracking:
-
-```text
-OrderLineItem
-  OrderID, ProductId, Quantity, FulfilledQuantity, BackorderQuantity, Status
-  ORD-001, PROD-1,    100,      60,                40,                PARTIAL
-```
-
-3. When stock replenishes:
-   - Check pending backorders
-   - Ship remainder
-
-**Pros:**
-- Customer gets partial shipment quickly
-- Reduces wait time for backorder
-- Improves satisfaction
-
-**Cons:**
-- Multiple shipments = higher shipping cost
-- Inventory tracking complexity
-- Return management becomes complex
-
-### Solution 4: Flexible Backorder with Expiry and Cancellation
-
-**How it works internally:**
-
-1. Create backorder with configurable options:
-
-```text
-BackorderID, ProductId, CustomerId, Quantity, ExpiresAt, AutoFulfill, Status
-BO-001,      PROD-1,    CUST-A,     40,       2026-08-20, true,         PENDING
-```
-
-2. On backorder:
-   - Notify customer: "We'll ship on [date] or you can cancel"
-   - If AutoFulfill=true, ship when stock available
-   - If AutoFulfill=false, wait for customer confirmation
-3. On expiry:
-   - If not fulfilled, automatically cancel and refund
-   - Notify customer
-
-**Pros:**
-- Customer control (confirm or cancel)
-- Reduces abandoned backorders
-- Clear expectations
-
-**Cons:**
-- More interactive (API calls to confirm)
-- Requires notification system
-
-### Recommendation
-
-Use **Solution 2 (Full Backorders)** for high-demand, limited-supply scenarios (e.g., Apple launch). Use **Solution 3 (Partial Fulfillment)** for e-commerce with predictable restocking. Use **Solution 4 (Flexible)** for premium customers or luxury goods.
-
----
-
-## Deep Dive #8: Database Design for 100M+ Products at Scale
+## Deep Dive #4: Database Design for 100M+ Products at Scale
 
 ### Question
 
@@ -1224,6 +680,550 @@ Use **Solution 1** for < 10M products. Use **Solution 2 (Sharding)** for 10M-1B 
 
 ---
 
+## Deep Dive #5: Stock Reservations, Holds, and Pre-Allocation
+
+### Question
+
+**How would you support reserving stock for an order that hasn't been paid yet? What if a customer abandons their cart after 30 minutes?**
+
+### The Problem
+
+```
+Scenario 1:
+Customer A adds 10 units to cart (should this reduce available stock?)
+Customer B tries to buy the same 10 units
+Should Customer B's purchase be blocked, or should only paid orders hold stock?
+
+Scenario 2:
+Customer A reserves 10 units
+Customer A abandons cart after 30 minutes
+Should the stock automatically become available again?
+```
+
+### Solution 1: Soft Reservations (Logical Holds, Not Real Deductions)
+
+**How it works internally:**
+
+1. Create a `StockReservation` table:
+
+```text
+ReservationId, ProductId, Quantity, CustomerId, ExpiresAt, Status
+RES-001,       PROD-1,    10,       CUST-A,     2026-08-13 10:30, ACTIVE
+```
+
+2. Available stock calculation:
+
+```text
+AvailableStock = TotalStock - SUM(ReservedQuantity)
+```
+
+3. Expiration handled by:
+   - Background job checks expired reservations every 5 minutes
+   - Deletes expired reservations
+   - Available stock auto-increases
+
+**Pros:**
+- Flexible hold periods
+- Doesn't mutate actual inventory until payment
+- Easy to extend or cancel
+
+**Cons:**
+- Need background job to clean up
+- Another table to query
+- "Available" becomes calculated rather than stored
+
+### Solution 2: Hard Reservations (Immediate Stock Deduction)
+
+**How it works internally:**
+
+1. When customer adds to cart:
+   - Remove from inventory immediately
+   - Store in `CartItems` or `Order` table with status PENDING
+2. On payment:
+   - Status changes to CONFIRMED
+   - Stock remains removed
+3. On cart abandonment:
+   - Status changes to CANCELLED
+   - Stock is returned via `add_stock`
+
+**Pros:**
+- Inventory reflects true availability
+- Simple logic: inventory is what you see
+- No "surprise" oversells
+
+**Cons:**
+- Stock is locked up even if customer abandons cart
+- Requires cleanup job or timeout monitoring
+- Customer experience: see "sold out" if others add to cart first
+
+### Solution 3: Hybrid: Tiered Availability
+
+**How it works internally:**
+
+1. Track three tiers:
+
+```text
+TotalStock = 100
+ReservedForOrder = 30        (paid and confirmed)
+ReservedForCart = 40         (in abandoned carts, expires in 30 min)
+AvailableForNewOrders = 30   (TotalStock - ReservedForOrder - ReservedForCart)
+```
+
+2. When checking availability:
+   - Customers see "AvailableForNewOrders"
+   - Reserved stock is hidden but allocated
+3. On abandon:
+   - ReservedForCart decreases
+   - AvailableForNewOrders increases
+
+**Pros:**
+- Customers see realistic availability
+- Reserved stock is isolated from available
+- Clear separation of concerns
+
+**Cons:**
+- More complex tracking
+- More queries to calculate tiers
+
+### Recommendation
+
+Use **Solution 1 (Soft Reservations)** for simple systems where cart abandonment is common. Use **Solution 2 (Hard Reservations)** for inventory-constrained systems (e.g., tickets, limited runs). Use **Solution 3 (Hybrid)** for high-volume, mixed-urgency scenarios.
+
+---
+
+## Deep Dive #6: Multi-Warehouse Inventory Distribution
+
+### Question
+
+**How would you manage inventory across 50 warehouses? How do you route an order to the nearest warehouse with stock?**
+
+### The Problem
+
+```
+Product PROD-1:
+Warehouse US-East: 100 units
+Warehouse US-West: 50 units
+Warehouse EU-Central: 75 units
+
+Customer in New York orders 30 units.
+Which warehouse should fulfill?
+```
+
+Options:
+1. Always use US-East (closest)
+2. Use whichever has stock
+3. Balance across warehouses
+4. Reserve from nearest, fallback to furthest
+
+### Solution 1: Centralized Inventory (All in One Warehouse)
+
+**How it works internally:**
+
+1. Single global stock count
+2. Warehouse fulfillment is a separate routing layer
+3. On order: pick warehouse based on:
+   - Geographic proximity to customer
+   - Warehouse utilization
+   - Shipping cost
+
+**Pros:**
+- Simple stock tracking
+- Flexible fulfillment routing
+
+**Cons:**
+- No local inventory resilience
+- Network delays to central database
+
+### Solution 2: Distributed Inventory (Per-Warehouse Tracking)
+
+**How it works internally:**
+
+1. Each warehouse maintains its own inventory:
+
+```text
+InventoryByWarehouse
+  Warehouse, ProductId, Stock
+  US-East,   PROD-1,    100
+  US-West,   PROD-1,    50
+  EU-Central,PROD-1,    75
+```
+
+2. On order:
+   - Find nearest warehouse with stock
+   - Deduct from that warehouse
+   - If nearest is empty, try next closest
+   - Fallback to furthest if needed
+
+3. Rebalancing job periodically redistributes stock:
+   - Move from over-stocked to under-stocked warehouses
+   - Minimize long-term transit costs
+
+**Pros:**
+- Local resilience (one warehouse outage doesn't block all orders)
+- Faster fulfillment (local warehouse)
+- Independent scaling per warehouse
+
+**Cons:**
+- More complex queries (check multiple tables)
+- Rebalancing overhead
+- Risk of uneven distribution
+
+### Solution 3: Hierarchical Inventory (Hub-and-Spoke)
+
+**How it works internally:**
+
+1. Structure:
+
+```text
+Central Hub
+  ├── Regional Hub (US)
+  │     ├── Warehouse US-East
+  │     ├── Warehouse US-West
+  └── Regional Hub (EU)
+        ├── Warehouse EU-Central
+```
+
+2. Stock flows:
+   - Central Hub knows aggregate stock
+   - Regional Hubs know regional availability
+   - Local warehouses know local inventory
+3. Query routing:
+   - First check local warehouse
+   - If empty, check regional hub cache
+   - If still empty, check central hub
+
+**Pros:**
+- Balances locality and global visibility
+- Reduces cross-warehouse lookups
+- Hierarchical resilience
+
+**Cons:**
+- Cache inconsistency (hub and warehouse out of sync)
+- More complex rebalancing
+
+### Solution 4: Event-Driven Inventory Sync (Eventually Consistent)
+
+**How it works internally:**
+
+1. Each warehouse operates independently with local stock
+2. On stock change, publish event: `StockChanged(Warehouse, ProductId, NewQuantity)`
+3. Central inventory service subscribes and maintains aggregate view
+4. On order, central service suggests warehouse but doesn't enforce:
+   - Warehouse confirms stock availability
+   - If warehouse is out, customer is rerouted
+5. Eventual consistency: central view lags by ~1-5 seconds
+
+**Pros:**
+- Highly resilient (warehouses work even if central is down)
+- Scalable (no single bottleneck)
+- Works well for distributed teams
+
+**Cons:**
+- Possible double-sells during sync delay
+- Requires conflict resolution (which warehouse fulfills if multiple have stock)
+- More infrastructure (message queue, event bus)
+
+### Recommendation
+
+Use **Solution 2 (Distributed Inventory)** for systems with 10-50 warehouses and predictable demand. Add **Solution 3 (Hierarchical)** for complex supply chains. Use **Solution 4 (Event-Driven)** for global, autonomous warehouse networks.
+
+---
+
+## Deep Dive #7: Automated Stock Reorder and Predictive Restocking
+
+### Question
+
+**How would you automatically reorder stock when it drops below a threshold? How do you predict demand and avoid both stockouts and overstock?**
+
+### The Problem
+
+```
+Product PROD-1:
+Current stock: 8 units
+Reorder threshold: 20 units
+Daily demand: ~5 units (avg)
+Supplier lead time: 7 days
+
+If we order when stock hits 20, we may over-order.
+If we order at 10, we may run out before delivery.
+What's the optimal reorder point and quantity?
+```
+
+### Solution 1: Fixed Reorder Point (Simple, No Prediction)
+
+**How it works internally:**
+
+1. Define reorder point and reorder quantity (static):
+
+```text
+ReorderPoint = 50 units
+ReorderQuantity = 200 units
+```
+
+2. Background job every hour:
+   - Check current stock
+   - If stock <= ReorderPoint, create a `PurchaseOrder`
+3. Stop reordering if an open PO already exists for the product
+
+**Pros:**
+- Simple to implement
+- Works for stable demand
+
+**Cons:**
+- No demand forecasting
+- Leads to overstock in low-demand periods
+- Stockouts in high-demand periods
+
+### Solution 2: Demand-Based Reorder Point (Time-Series Analysis)
+
+**How it works internally:**
+
+1. Track historical demand:
+
+```text
+StockHistory table with daily/hourly removals
+ProductId, Date, QuantityRemoved
+PROD-1,    2026-08-01, 50
+PROD-1,    2026-08-02, 48
+PROD-1,    2026-08-03, 52
+```
+
+2. Calculate:
+   - Average daily demand (last 30 days)
+   - Standard deviation
+   - Seasonal trends (higher on weekends, etc)
+
+3. Reorder point formula:
+
+```text
+ReorderPoint = (AvgDailyDemand × SupplierLeadTime) + SafetyStock
+SafetyStock = StdDev × Z-score (e.g., Z=2 for 95% confidence)
+
+Example:
+AvgDailyDemand = 50 units
+SupplierLeadTime = 7 days
+StdDev = 10 units
+SafetyStock = 10 × 2 = 20 units
+ReorderPoint = (50 × 7) + 20 = 370 units
+```
+
+4. Reorder quantity based on economic order quantity (EOQ):
+
+```text
+EOQ = sqrt((2 × D × S) / H)
+D = annual demand
+S = order cost
+H = holding cost per unit per year
+```
+
+**Pros:**
+- Accounts for demand variability
+- Reduces overstock
+- Reduces stockout risk
+
+**Cons:**
+- Requires historical data (warm-up period)
+- Doesn't handle sudden demand spikes
+- Forecasting can be wrong
+
+### Solution 3: Dynamic Reorder with Real-Time Predictions
+
+**How it works internally:**
+
+1. Use machine learning or statistical model to predict demand for next week
+2. Update reorder point daily:
+
+```text
+PredictedDemand (next 7 days) = ML_model(historical_data, seasonality, events)
+ReorderPoint = (PredictedDemand) + SafetyStock
+```
+
+3. Trigger reorder when:
+   - Stock <= ReorderPoint OR
+   - Stock + AvailablePOs < MinimumSafetyLevel
+
+4. Reorder quantity:
+   - If demand is rising, order more
+   - If demand is falling, order less
+
+**Pros:**
+- Adapts to demand changes
+- Reduces stockout risk without over-ordering
+- Accounts for events (sales, holidays)
+
+**Cons:**
+- Requires ML infrastructure
+- Model accuracy matters
+- Can be expensive to train
+
+### Solution 4: Multi-Supplier with Diversified Lead Times
+
+**How it works internally:**
+
+1. Define multiple suppliers per product:
+
+```text
+SupplierA: LeadTime=7 days, CostPerUnit=$1.50, MinOrder=100
+SupplierB: LeadTime=3 days, CostPerUnit=$1.80, MinOrder=50
+SupplierC: LeadTime=14 days, CostPerUnit=$1.20, MinOrder=200
+```
+
+2. On reorder decision:
+   - If stock is critical (< SafetyStock), use SupplierB (fast, expensive)
+   - If stock is low but not critical, use SupplierA (balanced)
+   - If stock is falling slowly, use SupplierC (cheap, slow)
+
+3. Blend orders across suppliers to minimize total cost:
+
+```text
+TotalCost = (UnitCost × Quantity) + OrderingCost + HoldingCost
+```
+
+**Pros:**
+- Risk mitigation (supplier outage doesn't stop orders)
+- Cost optimization (use slow supplier when time allows)
+- Flexibility in lead times
+
+**Cons:**
+- Complex supplier management
+- Coordination overhead
+- May require dual-sourcing contracts
+
+### Recommendation
+
+Use **Solution 1 (Fixed Reorder)** for stable, high-volume products. Add **Solution 2 (Demand-Based)** for seasonal or variable products. Use **Solution 3 (ML Predictions)** for mission-critical inventory. Use **Solution 4 (Multi-Supplier)** for supply-chain resilience.
+
+---
+
+## Deep Dive #8: Handling Backorders and Partial Fulfillment
+
+### Question
+
+**What happens when a customer orders 100 units but only 60 are available? Do you allow backorders, split shipments, or reject the order?**
+
+### The Problem
+
+```
+Order: 100 units
+Available: 60 units
+
+Options:
+1. Reject order (customer goes elsewhere)
+2. Fulfill partially, ship 60 now, backorder 40 for later
+3. Hold order until all 100 are available (customer waits)
+4. Auto-notify customer and ask preference
+```
+
+### Solution 1: No Backorders (All or Nothing)
+
+**How it works internally:**
+
+1. On order:
+   - Check if `Stock >= OrderQuantity`
+   - If yes, deduct and ship
+   - If no, reject with "out of stock"
+
+**Pros:**
+- Simple logic
+- No partial shipments
+- Inventory is clean
+
+**Cons:**
+- Lost sales
+- Poor customer experience
+- Competitors benefit
+
+### Solution 2: Full Backorders (Hold Until Complete)
+
+**How it works internally:**
+
+1. Create `BackorderQueue` table:
+
+```text
+BackorderID, ProductId, CustomerId, Quantity, OrderDate, Status
+BO-001,      PROD-1,    CUST-A,     40,       2026-08-13, PENDING
+```
+
+2. When stock is replenished:
+   - Check backorder queue (FIFO)
+   - Allocate new stock to oldest backorder first
+   - Ship and mark as FULFILLED
+   - If still short, wait for next replenishment
+
+**Pros:**
+- No lost sales
+- FIFO fairness
+
+**Cons:**
+- Customers wait (some abandon orders)
+- Requires backorder management system
+- Cash flow impact (money collected but goods not shipped)
+
+### Solution 3: Partial Fulfillment with Split Shipments
+
+**How it works internally:**
+
+1. On order:
+   - Fulfill available stock immediately (Shipment 1)
+   - Create backorder for remainder (Shipment 2)
+   - Notify customer of split shipment plan
+
+2. Inventory tracking:
+
+```text
+OrderLineItem
+  OrderID, ProductId, Quantity, FulfilledQuantity, BackorderQuantity, Status
+  ORD-001, PROD-1,    100,      60,                40,                PARTIAL
+```
+
+3. When stock replenishes:
+   - Check pending backorders
+   - Ship remainder
+
+**Pros:**
+- Customer gets partial shipment quickly
+- Reduces wait time for backorder
+- Improves satisfaction
+
+**Cons:**
+- Multiple shipments = higher shipping cost
+- Inventory tracking complexity
+- Return management becomes complex
+
+### Solution 4: Flexible Backorder with Expiry and Cancellation
+
+**How it works internally:**
+
+1. Create backorder with configurable options:
+
+```text
+BackorderID, ProductId, CustomerId, Quantity, ExpiresAt, AutoFulfill, Status
+BO-001,      PROD-1,    CUST-A,     40,       2026-08-20, true,         PENDING
+```
+
+2. On backorder:
+   - Notify customer: "We'll ship on [date] or you can cancel"
+   - If AutoFulfill=true, ship when stock available
+   - If AutoFulfill=false, wait for customer confirmation
+3. On expiry:
+   - If not fulfilled, automatically cancel and refund
+   - Notify customer
+
+**Pros:**
+- Customer control (confirm or cancel)
+- Reduces abandoned backorders
+- Clear expectations
+
+**Cons:**
+- More interactive (API calls to confirm)
+- Requires notification system
+
+### Recommendation
+
+Use **Solution 2 (Full Backorders)** for high-demand, limited-supply scenarios (e.g., Apple launch). Use **Solution 3 (Partial Fulfillment)** for e-commerce with predictable restocking. Use **Solution 4 (Flexible)** for premium customers or luxury goods.
+
+---
+
 ## Summary
 
 | Deep Dive | Key Technique | When to Use |
@@ -1231,11 +1231,11 @@ Use **Solution 1** for < 10M products. Use **Solution 2 (Sharding)** for 10M-1B 
 | **Concurrent Updates** | Optimistic locking or atomic constraints | Always - prevents double sells |
 | **Query Efficiency** | Indexed queries + materialized views | High query volume |
 | **Caching** | LRU + TTL + cache warming | Sub-50ms response times |
+| **Database Scaling** | Sharding + OLTP/OLAP separation + partitioning | 100M+ products |
 | **Stock Reservations** | Soft reservations with expiry | Cart/order systems |
 | **Multi-Warehouse** | Distributed inventory + rebalancing | 10+ warehouses |
 | **Automated Reorder** | Demand-based reorder points + ML predictions | Predictable supply chains |
 | **Backorders** | Partial fulfillment with expiry options | High-demand products |
-| **Database Scaling** | Sharding + OLTP/OLAP separation + partitioning | 100M+ products |
 
 **General Recommendations:**
 
