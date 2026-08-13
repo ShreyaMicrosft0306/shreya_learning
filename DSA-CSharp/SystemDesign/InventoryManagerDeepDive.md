@@ -57,7 +57,7 @@ Both users see 5 units available. Both proceed to remove 4. Final stock should b
 - No double removals possible
 
 **Cons:**
-- Reduced throughput (serialized access per product)
+- Reduced throughput (serialized access per product) even reads locked
 - Can cause deadlocks in complex scenarios
 - Slower for high-concurrency scenarios
 
@@ -111,6 +111,12 @@ Both users see 5 units available. Both proceed to remove 4. Final stock should b
 4. Consumer checks stock, removes, and publishes `StockRemoved` event
 5. Ordering is guaranteed per product; no race conditions
 
+Partitioned queue by product_id
+Multiple consumers
+Sequential processing only per product
+Parallel processing across products
+
+
 **Pros:**
 - Scales to very high concurrency
 - Audit trail of all stock changes
@@ -139,7 +145,8 @@ Naive approach: Scan all products and filter in-memory → O(n) every query
 
 ```
 SELECT * FROM Inventory
-THEN filter in application logic
+filter at db level stock<10  still need to scan all rows to check this condition without an index
+or filter in application logic
 → With 1M products, this is very slow
 ```
 
@@ -152,6 +159,17 @@ THEN filter in application logic
    - If stock was above threshold and now below, INSERT
    - If stock was below and now above, DELETE
 3. Query this view directly: `SELECT * FROM LowStockAlerts` → O(1) on table size
+Inventory
+├── ProductId (PK)
+├── ProductName
+├── Stock
+└── Category
+
+LowStockAlerts  ← Pre-computed view
+├── ProductId (FK)
+├── ProductName
+├── Stock
+└── UpdatedAt
 
 **Pros:**
 - Queries are extremely fast
@@ -180,6 +198,14 @@ THEN filter in application logic
 - If many products below threshold, scan is expensive
 
 ### Solution 3: Time-Series Data and Turnover Tracking
+Top movers are the products that had the most activity during a specific time period.
+
+Product | Units removed/sold
+--------|--------------
+MILK    | 100
+BREAD   | 75
+CHEESE  | 10
+
 
 **How it works internally:**
 
@@ -192,13 +218,24 @@ PROD-1,    2026-08-13 10:05, REMOVE,   3,         42
 PROD-1,    2026-08-13 10:10, ADD,      10,        52
 ```
 
-2. Calculate turnover for a time window:
+2. Calculate top movers for a time window:
 
 ```text
-Turnover (last hour) = SUM(Quantity) WHERE Action = 'REMOVE' AND Timestamp > NOW() - 1 hour
-```
+SELECT
+    ProductId,
+    SUM(Quantity) AS UnitsMoved
+FROM StockHistory
+WHERE Action = 'REMOVE'
+  AND Timestamp >= CURRENT_TIMESTAMP - INTERVAL '1 hour'
+GROUP BY ProductId
+ORDER BY UnitsMoved DESC
+LIMIT 10;```
 
-3. Create `TurnoverCache` updated every 5 minutes
+CREATE INDEX idx_stock_history_movers
+ON StockHistory (Action, Timestamp, ProductId);
+
+3. Create `TopMoversCache` updated every 5 minutes
+For very frequent dashboard queries, calculate the totals every few minutes and store them in a TopMoversCache table instead of scanning StockHistory every time.
 
 **Pros:**
 - Complete audit trail

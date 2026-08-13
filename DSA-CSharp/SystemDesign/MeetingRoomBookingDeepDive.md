@@ -213,6 +213,173 @@ Every second Monday, 2:30 PM - 3:30 PM
 
 **Recommendation:** Use **hybrid approach** - store series metadata but materialize occurrences for the next 90 days for query efficiency.
 
+### Deep Dive #3A: Custom Recurrence Schedules and Efficient Implementation
+
+#### Question
+**How would you support custom recurring schedules such as every second Monday, every two weeks, the last business day of the month, or weekdays excluding holidays? How would you implement this efficiently without storing every future occurrence?**
+
+#### Examples of Custom Schedules
+
+```text
+Every weekday at 10:00 AM
+Every second Monday of the month at 2:00 PM
+Every two weeks on Tuesday at 9:00 AM
+First and third Friday of every month at 4:00 PM
+Last business day of every month at 5:00 PM
+Every weekday except public holidays at 9:00 AM
+```
+
+#### Solution: Store Rules, Materialize a Rolling Window
+
+**How it works internally:**
+1. Store the recurring meeting as one `BookingSeries` record instead of storing every future meeting
+2. Represent the recurrence using a standard rule format such as iCalendar/RFC 5545
+3. Generate occurrences only for the date range requested by a user or conflict check
+4. Materialize actual occurrence rows for a rolling window, such as the next 60-90 days
+5. Run a background job daily to extend the window and archive past occurrences
+6. Store individual cancellations and moved meetings as exceptions
+7. Add a unique constraint on `(SeriesId, OriginalOccurrenceStartUtc)` so retries cannot create duplicates
+
+#### Example Data Model
+
+**`BookingSeries`:**
+
+```text
+SeriesId       = S100
+RoomId         = ROOM-101
+StartDate      = 2026-01-01
+EndDate        = 2026-12-31
+StartTime      = 14:00
+EndTime        = 15:00
+TimeZone       = America/New_York
+RecurrenceRule = FREQ=MONTHLY;BYDAY=2MO
+```
+
+The rule means:
+
+```text
+Every second Monday of the month, 2:00 PM - 3:00 PM
+```
+
+Other rule examples:
+
+```text
+FREQ=WEEKLY;INTERVAL=2;BYDAY=TU   -> Every two weeks on Tuesday
+FREQ=MONTHLY;BYDAY=1FR            -> First Friday of every month
+FREQ=MONTHLY;BYDAY=-1FR           -> Last Friday of every month
+FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR   -> Every weekday
+```
+
+**`BookingOccurrence`:**
+
+```text
+OccurrenceId
+SeriesId
+RoomId
+OriginalOccurrenceStartUtc
+StartUtc
+EndUtc
+Status             // Active or Cancelled
+```
+
+**`BookingException`:**
+
+```text
+SeriesId
+OriginalOccurrenceStartUtc
+Type               // Cancelled or Modified
+NewRoomId
+NewStartUtc
+NewEndUtc
+```
+
+#### Efficient Conflict Checking
+
+When a user creates a recurring booking:
+
+1. Validate the recurrence rule and date range
+2. Generate only the requested occurrences, for example the next 12 weeks
+3. Query existing occurrences for the same room and overlapping date range
+4. Compare intervals using:
+
+```text
+existingStart < requestedEnd
+AND existingEnd > requestedStart
+```
+
+5. Return the conflicting dates or reject the complete series
+6. Store the series and occurrences in one transaction
+
+For example:
+
+```text
+Existing:  Every Monday, 2:00 PM - 3:00 PM
+Requested: Every Monday, 2:30 PM - 3:30 PM for 12 weeks
+Result:    12 conflicting occurrences
+```
+
+If the existing meeting has an exception for one Monday, that occurrence is removed or moved before
+the comparison. Therefore, only the effective occurrences are checked.
+
+#### Background Materialization Job
+
+```text
+Every day:
+1. Find active recurring series
+2. Generate occurrences until today + 90 days
+3. Apply cancellations and modifications
+4. Insert missing occurrences
+5. Ignore duplicates using the unique constraint
+6. Archive occurrences that are in the past
+```
+
+The job must be **idempotent**, meaning running it twice produces the same result as running it once.
+This protects the system when a job is retried after a timeout.
+
+#### Indexes
+
+Use an index for fast availability and conflict queries:
+
+```text
+(RoomId, StartUtc, EndUtc)
+```
+
+Also use:
+
+```text
+UNIQUE (SeriesId, OriginalOccurrenceStartUtc)
+```
+
+The first index speeds up overlap searches. The unique constraint prevents duplicate occurrences
+when the materialization job runs repeatedly.
+
+#### Handling Holidays and Business Days
+
+For a schedule such as:
+
+```text
+Every weekday at 9:00 AM, except holidays
+```
+
+The recurrence generator creates weekday occurrences, then checks a `HolidayCalendar`:
+
+```text
+if occurrence.DayOfWeek is Saturday or Sunday:
+   skip
+else if HolidayCalendar.Contains(occurrence.Date):
+   skip
+else:
+   create occurrence
+```
+
+Keep holiday calendars separate because holidays vary by country, office, and year.
+
+#### Recommendation
+
+Use a standard recurrence-rule library instead of implementing every calendar rule manually. Keep the
+series rule and exceptions as the source of truth, materialize the next 60-90 days for fast reads and
+conflict checking, and use a daily idempotent background job to extend the materialized window.
+
 ---
 
 ## Deep Dive #4: Handling Time Zones and Global Teams
