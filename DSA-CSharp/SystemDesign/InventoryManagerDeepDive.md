@@ -14,11 +14,32 @@ Build a module that manages product inventory. Implement the following operation
 
 **Baseline complexity:**
 
+Let:
+- `p` = number of distinct products
+- `m` = number of products matching a query result
+- `h` = number of stock history records
+- `w` = number of warehouses
+- `r` = number of active reservations
+
 | Operation | Time | Space | Notes |
 |-----------|------|-------|-------|
-| `add_stock` | O(1) | O(p) | p = distinct products; dict keyed by product_id |
-| `remove_stock` | O(1) | — | Lookup + validation |
-| `check_availability` | O(1) | — | Direct key access |
+| `add_stock(product_id, quantity)` | O(1) average | O(p) total | Hash map/dictionary keyed by `product_id` |
+| `remove_stock(product_id, quantity)` | O(1) average | O(p) total | Lookup product, validate stock, update quantity |
+| `check_availability(product_id)` | O(1) average | O(p) total | Direct hash map lookup |
+
+**Follow-up complexity:**
+
+| Feature / Follow-up | Naive Time | Optimized Time | Extra Space | Notes |
+|---------------------|------------|----------------|-------------|-------|
+| Low-stock query: `stock < threshold` | O(p) | O(log p + m) with B-Tree / sorted index | O(p) | Index avoids scanning every product |
+| Top movers in last hour | O(h) | O(log h + m) with timestamp index, or O(k) from cache | O(h) history + O(k) cache | `k` = cached top products |
+| Stock turnover calculation | O(h) | O(log h + m), or O(1) per product from precomputed cache | O(h) history + cache | Requires `StockHistory` table |
+| Reservation-aware availability | O(r) | O(1) if reserved quantity is stored per product | O(r) or O(p) | Avoid summing reservations on every read |
+| Multi-warehouse lookup | O(w) | O(w log w) if sorting by distance, O(w) if scanning nearest first | O(wp) | Need per-warehouse inventory |
+| LRU cache lookup | O(1) | O(1) | O(c) | `c` = cache capacity; uses hash map + linked list |
+| TTL cache expiry | O(c) scan | O(log c) with min-heap | O(c) | Heap stores entries by expiry time |
+
+**Key takeaway:** The basic operations are O(1), but real system-design follow-ups usually add query, history, reservation, warehouse, and cache complexity. The main optimization pattern is to avoid scanning all products or all history records on every request.
 
 ---
 
@@ -198,13 +219,14 @@ LowStockAlerts  ← Pre-computed view
 - If many products below threshold, scan is expensive
 
 ### Solution 3: Time-Series Data and Turnover Tracking
+
 Top movers are the products that had the most activity during a specific time period.
 
-Product | Units removed/sold
---------|--------------
-MILK    | 100
-BREAD   | 75
-CHEESE  | 10
+| Product | Units removed/sold |
+|---------|--------------------|
+| MILK    | 100                |
+| BREAD   | 75                 |
+| CHEESE  | 10                 |
 
 
 **How it works internally:**
@@ -229,13 +251,15 @@ WHERE Action = 'REMOVE'
   AND Timestamp >= CURRENT_TIMESTAMP - INTERVAL '1 hour'
 GROUP BY ProductId
 ORDER BY UnitsMoved DESC
-LIMIT 10;```
+LIMIT 10;
+```
 
+```sql
 CREATE INDEX idx_stock_history_movers
 ON StockHistory (Action, Timestamp, ProductId);
+```
 
-3. Create `TopMoversCache` updated every 5 minutes
-For very frequent dashboard queries, calculate the totals every few minutes and store them in a TopMoversCache table instead of scanning StockHistory every time.
+3. Create `TopMoversCache` and update it every 5 minutes. For very frequent dashboard queries, calculate the totals periodically and store them in this cache instead of scanning `StockHistory` every time.
 
 **Pros:**
 - Complete audit trail
@@ -269,7 +293,159 @@ Use **Solution 2 (Indexed Queries)** for ad-hoc low-stock checks. Add **Solution
 
 ---
 
-## Deep Dive #3: Stock Reservations, Holds, and Pre-Allocation
+## Deep Dive #3: Caching Strategies & Cache Invalidation
+
+### Question
+
+**How do you serve sub-50ms responses when database queries take 200ms? How do you cache without stale data?**
+
+### The Problem
+
+```
+Scenario:
+Users query "low stock products" every 2 seconds
+Database query takes 200ms
+Need sub-50ms response times
+Problem: Cache becomes stale if stock changes
+```
+
+### Solution 1: LRU Cache (Least Recently Used)
+
+**How it works internally:**
+
+1. Maintain an in-memory cache with fixed size (e.g., 1000 entries)
+2. Use `HashMap<ProductId, StockInfo>` for O(1) lookup
+3. Use `DoublyLinkedList` to track access order
+4. When cache is full, evict least recently used entry
+
+**DSA Used:**
+```text
+HashMap: O(1) lookup
+DoublyLinkedList: O(1) eviction/insertion
+Combined (LRU): HashMap + LinkedHashMap
+```
+
+**Pros:**
+- Fast O(1) lookups
+- Automatic eviction of old data
+- Works well for frequently accessed products
+
+**Cons:**
+- Most recently used data survives (may not be most valuable)
+- Doesn't account for importance/priority
+- Stale data risk if updates are async
+
+### Solution 2: TTL-Based Cache (Time-To-Live)
+
+**How it works internally:**
+
+1. Store cache entry with timestamp: `CacheEntry<ProductId, StockInfo, ExpiryTime>`
+2. Use `PriorityQueue<CacheEntry, Timestamp>` to track expirations
+3. Background job every 5 minutes:
+    - Check heap for expired entries
+    - Remove expired entries
+    - Refresh with fresh database values
+4. On query:
+    - Check if cache entry exists and not expired
+    - Return cached value if valid
+    - Query database if expired or missing
+
+**DSA Used:**
+```text
+HashMap: O(1) lookup
+PriorityQueue (Min-Heap): O(log n) insertion/removal
+Timestamp comparison: O(1)
+```
+
+**Pros:**
+- Guaranteed fresh data (max age = TTL)
+- Simple expiration logic
+- Predictable staleness bounds
+
+**Cons:**
+- Extra storage for timestamps
+- Background job overhead
+- TTL may be too aggressive or too lenient
+
+### Solution 3: Write-Through vs Write-Back Caching
+
+**Write-Through (Synchronous):**
+
+```text
+Client → Update Cache → Write to Database
+            (both must succeed)
+```
+
+1. Update cache first
+2. Then write to database
+3. Only return success if both complete
+4. More consistency, but slower
+
+**Write-Back (Asynchronous):**
+
+```text
+Client → Update Cache → Return Success → Async write to Database
+            (cache updates immediately)
+```
+
+1. Update cache immediately
+2. Queue async write to database
+3. Return success to client right away
+4. Database eventually updated (eventual consistency)
+
+**Pros (Write-Through):**
+- Guaranteed consistency
+- No lost updates
+
+**Cons (Write-Through):**
+- Slower responses
+- Entire operation blocks if database is slow
+
+**Pros (Write-Back):**
+- Fast responses (cache write only)
+- Better throughput
+
+**Cons (Write-Back):**
+- Risk of data loss if cache crashes before write
+- Eventual consistency (temporary stale reads)
+
+### Solution 4: Cache Warming & Pre-computation
+
+**How it works internally:**
+
+1. Identify hot products (top 100 most accessed)
+2. Background job at startup:
+    - Load hot products into cache
+    - Calculate "low stock" view for these products
+3. Refresh hot cache every 5 minutes:
+    - Recalculate low stock
+    - Update popularity metrics
+4. Client queries hit warm cache immediately
+
+**DSA Used:**
+```text
+HashMap: Store hot products
+PriorityQueue: Track access frequency
+Timer/Scheduler: Periodic refresh
+```
+
+**Pros:**
+- Zero cache misses for hot data
+- Predictable latency
+- Reduces database load dramatically
+
+**Cons:**
+- Must identify hot products upfront
+- Memory overhead for preloaded data
+- Startup time increases
+
+### Recommendation
+
+Use **Solution 2 (TTL-Based)** as baseline for all queries. Add **Solution 1 (LRU)** for frequently changing data. Use **Solution 3 (Write-Through)** for consistency-critical updates. Use **Solution 4 (Cache Warming)** for known hot products.
+
+---
+
+## Deep Dive #4: Stock Reservations, Holds, and Pre-Allocation
 
 ### Question
 
@@ -380,7 +556,7 @@ Use **Solution 1 (Soft Reservations)** for simple systems where cart abandonment
 
 ---
 
-## Deep Dive #4: Multi-Warehouse Inventory Distribution
+## Deep Dive #5: Multi-Warehouse Inventory Distribution
 
 ### Question
 
@@ -518,7 +694,7 @@ Use **Solution 2 (Distributed Inventory)** for systems with 10-50 warehouses and
 
 ---
 
-## Deep Dive #5: Automated Stock Reorder and Predictive Restocking
+## Deep Dive #6: Automated Stock Reorder and Predictive Restocking
 
 ### Question
 
@@ -684,7 +860,7 @@ Use **Solution 1 (Fixed Reorder)** for stable, high-volume products. Add **Solut
 
 ---
 
-## Deep Dive #6: Handling Backorders and Partial Fulfillment
+## Deep Dive #7: Handling Backorders and Partial Fulfillment
 
 ### Question
 
@@ -813,27 +989,265 @@ Use **Solution 2 (Full Backorders)** for high-demand, limited-supply scenarios (
 
 ---
 
+## Deep Dive #8: Database Design for 100M+ Products at Scale
+
+### Question
+
+**How do you design a database that handles 100M+ products with sub-100ms latency? What happens when a single table gets too large?**
+
+### The Problem
+
+```
+Scenario:
+- 100 million products
+- Each product has: ProductId, Stock, Price, Category, LastUpdated, ReservedStock
+- Single table: Inventory (100M rows)
+- Index size: ~5GB for B-Tree index on Stock
+- Query: "All products with stock < 10"
+  Takes 500ms (scans 100K matching rows)
+
+At peak: 100K requests/second
+Single database becomes bottleneck
+```
+
+### Solution 1: Single Optimized Database (for <10M products)
+
+**Schema:**
+
+```sql
+CREATE TABLE Inventory (
+  ProductId BIGINT PRIMARY KEY,
+  SKU VARCHAR(50) UNIQUE NOT NULL,
+  Stock INT NOT NULL CHECK (Stock >= 0),
+  ReservedStock INT DEFAULT 0,
+  Price DECIMAL(10,2),
+  Category VARCHAR(100),
+  WarehouseId INT,
+  Version INT DEFAULT 1,
+  LastUpdated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_stock (Stock),
+  INDEX idx_category_stock (Category, Stock),
+  INDEX idx_warehouse_product (WarehouseId, ProductId)
+);
+
+CREATE TABLE StockHistory (
+  HistoryId BIGINT PRIMARY KEY AUTO_INCREMENT,
+  ProductId BIGINT,
+  Action VARCHAR(10),  -- 'ADD', 'REMOVE', 'RESERVE'
+  Quantity INT,
+  Timestamp TIMESTAMP,
+  INDEX idx_product_time (ProductId, Timestamp DESC),
+  INDEX idx_time_action (Timestamp, Action)
+);
+```
+
+**Pros:**
+- Simple to maintain
+- ACID guarantees
+- No distributed complexity
+- Good for single region
+
+**Cons:**
+- Single table gets too large (100M+ rows)
+- Index maintenance is expensive
+- Scans become slow
+- Hard to scale reads beyond replication
+
+**Complexity:**
+```
+add_stock:        O(1) + O(log n) index update
+remove_stock:     O(1) + O(log n) index update
+check_low_stock:  O(log n + m) with index
+```
+
+### Solution 2: Horizontal Sharding (Partition by ProductId)
+
+**How it works internally:**
+
+1. Split 100M products across 10 database shards:
+   - Shard 0: ProductIds 0-9,999,999 (10M products)
+   - Shard 1: ProductIds 10M-19,999,999
+   - ... Shard 9: ProductIds 90M-100M
+
+2. Shard key = `ProductId % 10`
+
+3. Application logic:
+```csharp
+shard_id = ProductId % NUM_SHARDS;
+db = GetShardConnection(shard_id);
+result = db.Query("SELECT * FROM Inventory WHERE ProductId = ?");
+```
+
+4. Each shard holds only 10M rows:
+   - Much faster indexes
+   - Faster full table scans
+   - Easier to manage
+
+**Pros:**
+- Scales to any size
+- Each shard is manageable
+- Parallel queries across shards
+- Per-shard failover is simpler
+
+**Cons:**
+- Complex queries (e.g., "all products in category X"):
+  - Must query all shards
+  - Aggregate results in application
+- Cross-shard transactions are hard
+- Shard rebalancing is expensive (hot products)
+- Need shard-aware routing layer
+
+**Complexity:**
+```
+add_stock:        O(1) + index update (per shard, 10M rows)
+get_low_stock:    O(s * (log m + k)) where s = shards, m = rows per shard
+range_query:      O(s * full_scan) = O(100M) but parallel
+```
+
+### Solution 3: OLTP + OLAP Separation (Data Warehouse)
+
+**How it works internally:**
+
+1. **OLTP Database** (write-optimized):
+   - Real-time inventory updates
+   - Only current stock state
+   - Fast writes
+   - Used for add_stock, remove_stock, check_availability
+
+2. **OLAP Warehouse** (read-optimized):
+   - Denormalized, columnar storage
+   - Historical data + aggregations
+   - Updated via ETL every 5 minutes
+   - Used for: low-stock queries, trends, reports, analytics
+
+**Architecture:**
+```
+Inventory Service
+      |
+      v
+OLTP DB (MySQL/PostgreSQL)    <- Writes (add_stock, remove_stock)
+      |
+      | ETL (every 5 min)
+      v
+OLAP Warehouse (Redshift/BigQuery)  <- Reads (analytics, low-stock, trends)
+```
+
+**Schemas:**
+
+OLTP (normalized, small):
+```sql
+Inventory (ProductId, Stock, ReservedStock, LastUpdated)
+```
+
+OLAP (denormalized, large):
+```sql
+InventoryFacts (
+  ProductId, 
+  Stock, 
+  ReservedStock, 
+  Category, 
+  Price, 
+  WarehouseId,
+  DayDate,
+  HourDate,
+  TotalRemoved7Days,
+  TotalAdded7Days,
+  Turnover,
+  IsLowStock,
+  ... more aggregations
+)
+```
+
+**Pros:**
+- OLTP stays fast (only current state)
+- OLAP can handle 100M+ rows efficiently
+- Columnar storage compresses 80% of data
+- Complex queries don't block writes
+
+**Cons:**
+- ETL latency (5-30 minute delay)
+- Duplicate data (storage cost)
+- Complex architecture
+- Eventual consistency between OLTP and OLAP
+
+**Complexity:**
+```
+add_stock (OLTP):     O(1) + index
+low_stock (OLAP):     O(1) if precomputed, O(scan) if not
+ETL sync:             O(100M) every 5 minutes
+```
+
+### Solution 4: Time-Based Partitioning (Hybrid Approach)
+
+**How it works internally:**
+
+1. Partition Inventory table by date:
+   - `Inventory_2026_08` (current month, hot)
+   - `Inventory_2026_07` (older, warm)
+   - `Inventory_2026_archive` (older, cold)
+
+2. Current month stays small and fast
+
+3. Older data automatically moved to cheaper storage (archive tier)
+
+4. Queries transparently use right partition:
+```sql
+SELECT * FROM Inventory_CURRENT
+WHERE Stock < 10;
+```
+
+**Combined with Sharding:**
+
+```
+Shard 0, Partition 2026_08   <- Hot (10M products, current month)
+Shard 0, Partition 2026_07   <- Warm (10M products, last month)
+Shard 0, Partition archive   <- Cold (historical, slow storage)
+
+Shard 1, Partition 2026_08   <- Hot
+... more shards
+```
+
+**Pros:**
+- Hot data is small and fast
+- Cold data archived to cheaper storage
+- Easy to drop old partitions
+- Transparent to queries
+
+**Cons:**
+- Queries spanning multiple partitions are slower
+- Partition key strategy matters
+- Manual partition management
+
+### Recommendation
+
+Use **Solution 1** for < 10M products. Use **Solution 2 (Sharding)** for 10M-1B products. Add **Solution 3 (OLAP)** if you need complex analytics. Use **Solution 4 (Time-based partitioning)** as an additional layer if your data grows over time and you need to archive old records.
+
+---
+
 ## Summary
 
 | Deep Dive | Key Technique | When to Use |
 |-----------|---------------|-------------|
 | **Concurrent Updates** | Optimistic locking or atomic constraints | Always - prevents double sells |
 | **Query Efficiency** | Indexed queries + materialized views | High query volume |
+| **Caching** | LRU + TTL + cache warming | Sub-50ms response times |
 | **Stock Reservations** | Soft reservations with expiry | Cart/order systems |
 | **Multi-Warehouse** | Distributed inventory + rebalancing | 10+ warehouses |
 | **Automated Reorder** | Demand-based reorder points + ML predictions | Predictable supply chains |
 | **Backorders** | Partial fulfillment with expiry options | High-demand products |
+| **Database Scaling** | Sharding + OLTP/OLAP separation + partitioning | 100M+ products |
 
 **General Recommendations:**
 
 1. **Always validate before mutating**: Check constraints before removing stock
 2. **Use optimistic locking for high concurrency**: Reduces lock contention
-3. **Materialize high-frequency queries**: Low stock, trending products
+3. **Cache aggressively**: Use TTL + LRU for sub-50ms latency
 4. **Track history for auditing**: Why did stock drop? Who ordered it?
 5. **Design for eventual consistency**: Multi-warehouse systems benefit from async updates
 6. **Set clear expiry policies**: Reservations and backorders should auto-expire
 7. **Monitor stock levels in real-time**: Dashboards for critical products
 8. **Implement circuit breakers**: If reorder system fails, fall back to manual ordering
+9. **Plan for scale**: Use sharding before you hit 10M+ products; separate OLTP and OLAP early
 
 ---
 
@@ -1185,7 +1599,7 @@ class Program
 
 ---
 
-## Problem 3: Multi-Warehouse Inventory with Automatic Rebalancing
+
 
 ### Problem Statement
 
