@@ -5,15 +5,19 @@
 // insertion, and prefix checks are efficient.
 //
 // INPUT:
-//   N/A
+//   words and prefixes passed to Insert, Search, and StartsWith
+//   Example: Insert("apple"), Search("apple"), StartsWith("app")
 //
 // OUTPUT:
-//   N/A
+//   bool or void for the supported operations
+//   Example: Search("apple") = true, Search("app") = false
+//            StartsWith("app") = true
 //
 // EDGE CASES:
 //   - Empty input → no-op
 //   - Single-character word → stored correctly
 //   - Duplicate insertion → should not create duplicate paths
+//   - Search for a prefix alone → false unless that prefix is a stored word
 //
 // ============================================================
 // HOW TO SOLVE — Simple Walkthrough
@@ -21,6 +25,32 @@
 // Key Insight:
 //   Store characters in a tree where each node represents a prefix.
 //   Going down one level means adding one character to the current word.
+//
+// Step-by-step with example: Insert("app"), Insert("apple")
+//
+//   1. Start at the root.
+//   2. Insert 'a':
+//      root --a--> node
+//   3. Insert 'p':
+//      node --p--> node
+//   4. Insert 'p':
+//      node --p--> node marked IsEndOfWord=true
+//      "app" is now a complete word.
+//   5. Insert "apple":
+//      reuse the "app" path, then add 'l' and 'e'.
+//      Mark the 'e' node IsEndOfWord=true.
+//
+//   Search("apple"):
+//     Follow a -> p -> p -> l -> e.
+//     The final 'e' node is marked as the end of a word, so return true.
+//
+//   Search("app"):
+//     Follow a -> p -> p.
+//     That node is marked as the end of a word, so return true.
+//
+//   StartsWith("apl"):
+//     Follow a -> p -> l.
+//     'l' has not been added under "ap", so return false.
 //
 // WHY THIS APPROACH?
 //   It makes prefix-based operations fast and avoids repeated scanning.
@@ -30,8 +60,14 @@
 // ============================================================
 //   n = number of characters inserted or searched
 //
-//   Time:  O(n)
+//   Time: O(n)
+//     - Insert follows one node per character: O(n)
+//     - Search and StartsWith follow at most n characters: O(n)
+//     - Match follows n prefix characters plus its matching words: O(n + k)
+//
 //   Space: O(n)
+//     - One node may be needed for each unique character path
+//     - Shared prefixes use fewer nodes
 // ============================================================
 
 public class Trie
