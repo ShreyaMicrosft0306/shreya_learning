@@ -1,82 +1,106 @@
-/*
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PROBLEM: Maximal Square
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-DESCRIPTION:
-Given an m x n matrix of 0s and 1s, return the area of the largest square
-containing only 1s.
-
-INPUT:
-- matrix: int[,] - Binary matrix where each cell is 0 or 1
-
-OUTPUT:
-- int - Area of the largest square containing only 1s
-
-EXAMPLES:
-Example 1:
-Input:
-[
- [0, 0, 1, 0, 0],
- [1, 1, 1, 0, 1],
- [0, 1, 1, 0, 0]
-]
-Output: 4
-Explanation: Largest square side = 2, so area = 2 * 2 = 4
-
-Example 2:
-Input:
-[
- [0, 1],
- [1, 0]
-]
-Output: 1
-
-Example 3:
-Input:
-[
- [0]
-]
-Output: 0
-
-CONSTRAINTS:
-- 1 <= m, n <= 300
-- matrix[i][j] is 0 or 1
-
-EDGE CASES:
-✓ All zeros -> answer 0
-✓ All ones -> answer is min(m, n)^2
-✓ Single row/column -> answer is 1 if any 1 exists, else 0
-✓ Mixed matrix with multiple candidate squares
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OPTIMAL SOLUTION
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-APPROACH:
-Use Dynamic Programming.
-
-Let dp[r, c] be the side length of the largest square whose bottom-right
-corner is at cell (r - 1, c - 1) in the original matrix.
-
-If matrix[r - 1, c - 1] == 1, then:
-  dp[r, c] = 1 + min(dp[r - 1, c], dp[r, c - 1], dp[r - 1, c - 1])
-Else:
-  dp[r, c] = 0
-
-Why minimum of top, left, and top-left?
-A square of side k can end at current cell only if all three neighboring
-positions can support at least side k - 1.
-
-Track the maximum side while filling dp, then return maxSide * maxSide.
-
-TIME COMPLEXITY: O(m * n)
-SPACE COMPLEXITY: O(m * n)
-
-PATTERN: Dynamic Programming - 2D Grid
-DIFFICULTY: Medium
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-*/
+// ============================================================
+// PROBLEM: Maximal Square
+// ============================================================
+// Given a binary matrix containing 0s and 1s, return the area of
+// the largest square made completely of 1s.
+//
+// INPUT:
+//   int[,] matrix — an m x n binary matrix
+//   Example:
+//     [
+//       [1, 1, 1],
+//       [1, 1, 0],
+//       [1, 1, 1]
+//     ]
+//
+// OUTPUT:
+//   int — the largest square area
+//   Example: 4
+//
+// EDGE CASES:
+//   - All zeroes → 0
+//   - All ones → min(rows, cols)²
+//   - Single row or column → 1 if any 1 exists, otherwise 0
+//   - Single cell 1 → 1
+//
+// ============================================================
+// HOW TO SOLVE — Simple Walkthrough
+// ============================================================
+// Key Insight (Dynamic Programming):
+//   Every cell can be the bottom-right corner of a square. We ask:
+//   "What is the largest square side that can end at this cell?"
+//
+//   If matrix[row, col] is 0:
+//     dp[row, col] = 0
+//
+//   If it is 1:
+//     dp[row, col] =
+//       1 + min(top, left, top-left)
+//
+//   The top, left, and top-left cells must already contain enough
+//   1-cells to support the square. Taking the minimum ensures all
+//   three required sides are available.
+//
+// Step-by-step example:
+//
+//   matrix:
+//     1 1 1
+//     1 1 0
+//     1 1 1
+//
+//   dp table:
+//     1 1 1
+//     1 2 0
+//     1 2 1
+//
+//   Why dp[1,1] = 2?
+//     Matrix cell (1,1) is 1.
+//     top = dp[0,1] = 1
+//     left = dp[1,0] = 1
+//     top-left = dp[0,0] = 1
+//     1 + min(1,1,1) = 2
+//
+//     This means a 2 x 2 square ending at (1,1) is possible:
+//       1 1
+//       1 1
+//
+//   Other 1-cells are checked in the same way. The largest dp value
+//   is the longest square side. If maxSide = 2:
+//
+//     area = 2 * 2 = 4
+//
+// Visualization:
+//
+//   1 1 1
+//   1 [1] 0
+//   1 [1] 1
+//
+//   The square includes the two rows and two columns around dp[1,1]:
+//
+//     [1 1]
+//     [1 1]
+//
+// Why this approach works:
+//   If any of top, left, or top-left cannot support a 2 x 2 square,
+//   a 2 x 2 square cannot end at the current cell. For example, if
+//   top-left is 0, the current 1 can only start a 1 x 1 square.
+//
+// ============================================================
+// TIME & SPACE COMPLEXITY
+// ============================================================
+//   m = number of rows
+//   n = number of columns
+//
+//   Time: O(m * n)
+//     - Each matrix cell is visited once
+//     - Its dp value is calculated in constant time
+//     - Total: O(m * n)
+//
+//   Space: O(m * n)
+//     - dp stores one side-length value per matrix cell
+//     - A one-row dp array can reduce this to O(n)
+//
+// ============================================================
 
 using System;
 
