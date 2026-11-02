@@ -37,6 +37,9 @@
 //     dp[row, col] =
 //       1 + min(top, left, top-left)
 //
+//   Here dp[row, col] corresponds directly to matrix[row, col].
+//   The r and c loop indices do not need padding or offset adjustments.
+//
 //   The top, left, and top-left cells must already contain enough
 //   1-cells to support the square. Taking the minimum ensures all
 //   three required sides are available.
@@ -119,19 +122,20 @@ namespace DSA_CSharp.DynamicProgramming
             int rows = matrix.GetLength(0);
             int cols = matrix.GetLength(1);
 
-            int[,] dp = new int[rows + 1, cols + 1];
+            int[,] dp = new int[rows, cols];
             int maxSide = 0;
 
-            for (int r = 1; r <= rows; r++)
+            for (int r = 0; r < rows; r++)
             {
-                for (int c = 1; c <= cols; c++)
+                for (int c = 0; c < cols; c++)
                 {
-                    if (matrix[r - 1, c - 1] == 1)
+                    if (matrix[r, c] == 1)
                     {
-                        dp[r, c] = 1 + Math.Min(
-                            dp[r - 1, c],
-                            Math.Min(dp[r, c - 1], dp[r - 1, c - 1])
-                        );
+                        int top = r > 0 ? dp[r - 1, c] : 0;
+                        int left = c > 0 ? dp[r, c - 1] : 0;
+                        int topLeft = r > 0 && c > 0 ? dp[r - 1, c - 1] : 0;
+
+                        dp[r, c] = 1 + Math.Min(top, Math.Min(left, topLeft));
 
                         if (dp[r, c] > maxSide)
                         {
