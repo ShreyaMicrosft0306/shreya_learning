@@ -51,6 +51,16 @@
 //   Eventually the gap reaches 0 — they are at the same node.
 //   Fast can never "jump over" slow by exactly 1 step without meeting.
 //
+// Finding the Cycle Entry:
+//   After slow and fast meet, reset one pointer to the head.
+//   Move both pointers one node at a time. The node where they meet
+//   is the first node in the cycle.
+//
+// Finding the Cycle Length:
+//   Keep one pointer at the meeting point and move a second pointer
+//   through the cycle until it returns to the meeting point.
+//   Count every visited node to obtain the cycle length.
+//
 // WHY THIS APPROACH?
 //   HashSet approach: store every visited node, check if current was seen before.
 //   → O(n) time but O(n) space — stores all nodes in memory.
@@ -74,8 +84,8 @@
 public class ListNode
 {
     public int val;
-    public ListNode next;
-    public ListNode(int val = 0, ListNode next = null)
+    public ListNode? next;
+    public ListNode(int val = 0, ListNode? next = null)
     {
         this.val = val;
         this.next = next;
@@ -84,21 +94,94 @@ public class ListNode
 
 public class LinkedListCycle
 {
-    public static bool Solve(ListNode head)
+    public static bool Solve(ListNode? head)
     {
+        if (head == null)
+            return false;
+
         ListNode slow = head;
         ListNode fast = head;
 
         while (fast != null && fast.next != null)
         {
-            slow = slow.next;        // move 1 step
-            fast = fast.next.next;   // move 2 steps
+            slow = slow.next!;        // move 1 step
+            fast = fast.next.next!;   // move 2 steps
 
             if (slow == fast)
                 return true;         // pointers met — cycle exists
         }
 
         return false;                // fast hit null — no cycle
+    }
+
+    /// <summary>
+    /// Finds the node where the cycle begins.
+    /// </summary>
+    public static ListNode? FindEntry(ListNode? head)
+    {
+        if (head == null)
+            return null;
+
+        ListNode? meeting = FindMeetingPoint(head);
+        if (meeting == null)
+            return null;
+
+        ListNode start = head;
+
+        while (start != meeting)
+        {
+            start = start.next!;
+            meeting = meeting.next!;
+        }
+
+        return start;
+    }
+
+    /// <summary>
+    /// Finds the number of nodes in the cycle.
+    /// </summary>
+    public static int FindCycleLength(ListNode? head)
+    {
+        if (head == null)
+            return 0;
+
+        ListNode? meeting = FindMeetingPoint(head);
+        if (meeting == null)
+            return 0;
+
+        ListNode? current = meeting.next;
+        int length = 1;
+
+        while (current != null && current != meeting)
+        {
+            length++;
+            current = current.next;
+        }
+
+        return length;
+    }
+
+    /// <summary>
+    /// Finds the meeting point of the slow and fast pointers.
+    /// </summary>
+    private static ListNode? FindMeetingPoint(ListNode? head)
+    {
+        if (head == null)
+            return null;
+
+        ListNode slow = head;
+        ListNode fast = head;
+
+        while (fast != null && fast.next != null)
+        {
+            slow = slow.next!;
+            fast = fast.next.next!;
+
+            if (slow == fast)
+                return slow;
+        }
+
+        return null;
     }
 
     public static void Main(string[] args)
@@ -112,6 +195,10 @@ public class LinkedListCycle
         n1.next = n2; n2.next = n3; n3.next = n4; n4.next = n5; n5.next = n2;
         Console.WriteLine("Example 1 (cycle):    " + Solve(n1));
         // Expected: true
+        Console.WriteLine("Example 1 (entry):    " + FindEntry(n1)?.val);
+        // Expected: 2
+        Console.WriteLine("Example 1 (length):   " + FindCycleLength(n1));
+        // Expected: 4
 
         // Example 2: 1→2→3→null  → false
         ListNode a = new ListNode(1);
@@ -120,6 +207,11 @@ public class LinkedListCycle
         a.next = b; b.next = c;
         Console.WriteLine("Example 2 (no cycle): " + Solve(a));
         // Expected: false
+        Console.WriteLine("Example 2 (entry):    " +
+                          (FindEntry(a) == null ? "none" : FindEntry(a)?.val.ToString()));
+        // Expected: none
+        Console.WriteLine("Example 2 (length):   " + FindCycleLength(a));
+        // Expected: 0
 
         // Example 3: single node pointing to itself  → true
         ListNode lone = new ListNode(1);
