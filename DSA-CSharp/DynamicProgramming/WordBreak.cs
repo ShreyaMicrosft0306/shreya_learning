@@ -87,6 +87,24 @@ SPACE COMPLEXITY: O(n)
 - dp stores one result for each prefix
 - The HashSet stores all dictionary words
 
+MEMOIZED BACKTRACKING EXPLANATION:
+Memoization saves the answer for each starting index.
+- memo[start] = null means the position has not been checked yet
+- memo[start] = true means s[start...] can be segmented
+- memo[start] = false means s[start...] cannot be segmented
+
+Example: s = "catsandog", wordDict = ["cats", "sand", "and", "dog"]
+- Start at index 0. Try "cats"; if present, call index 4
+- At index 4, try "and"; if present, call index 7
+- At index 7, try "dog"; if present, call index 10
+- index 10 equals s.Length, so the complete string is segmentable
+
+When a start index has already been memoized, that method call returns
+its saved result immediately instead of trying the same substrings again.
+
+BACKTRACKING TIME: O(n²) with memoization, O(2^n) without it
+BACKTRACKING SPACE: O(n)
+
 PATTERN: Dynamic Programming - String Segmentation
 DIFFICULTY: Medium
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -136,25 +154,81 @@ namespace DSA_CSharp.DynamicProgramming
             return dp[n];
         }
 
+        /// <summary>
+        /// Uses memoized backtracking to check each possible segmentation.
+        /// Time: O(n²), Space: O(n)
+        /// </summary>
+        public bool SolutionWithMemo(string s, IList<string> wordDict)
+        {
+            if (string.IsNullOrEmpty(s))
+                return true;
+
+            if (wordDict == null || wordDict.Count == 0)
+                return false;
+
+            var dictionary = new HashSet<string>(wordDict);
+            bool?[] memo = new bool?[s.Length];
+
+            bool CanSegment(int start)
+            {
+                // The start index reached the end, so the complete string is valid.
+                if (start == s.Length)
+                    return true;
+
+                // null means this start position has not been checked yet.
+                if (memo[start].HasValue)
+                    return memo[start].Value;
+
+                for (int end = start + 1; end <= s.Length; end++)
+                {
+                    string word = s.Substring(start, end - start);
+
+                    if (dictionary.Contains(word) && CanSegment(end))
+                    {
+                        // Store true because the remaining string is segmentable.
+                        memo[start] = true;
+                        return true;
+                    }
+                }
+
+                // Store false so this start position is not explored again.
+                memo[start] = false;
+                return false;
+            }
+
+            return CanSegment(0);
+        }
+
         public static void Test()
         {
             var solution = new WordBreak();
 
             Console.WriteLine("=== Word Break Test Cases ===\n");
 
-            Console.WriteLine($"Example 1: {solution.Solution("leetcode", new[] { "leet", "code" })}");
+            bool example1BottomUp = solution.Solution("leetcode", new[] { "leet", "code" });
+            bool example1Memo = solution.SolutionWithMemo("leetcode", new[] { "leet", "code" });
+            Console.WriteLine($"Example 1 - Bottom-up: {example1BottomUp}");
+            Console.WriteLine($"Example 1 - Memoized: {example1Memo}");
             Console.WriteLine("Expected: true\n");
 
-            Console.WriteLine($"Example 2: {solution.Solution("applepenapple", new[] { "apple", "pen" })}");
+            bool example2BottomUp = solution.Solution("applepenapple", new[] { "apple", "pen" });
+            bool example2Memo = solution.SolutionWithMemo("applepenapple", new[] { "apple", "pen" });
+            Console.WriteLine($"Example 2 - Bottom-up: {example2BottomUp}");
+            Console.WriteLine($"Example 2 - Memoized: {example2Memo}");
             Console.WriteLine("Expected: true\n");
 
-            Console.WriteLine($"Example 3: {solution.Solution("catsandog", new[] { "cats", "dog", "sand", "and", "cat" })}");
+            bool example3BottomUp = solution.Solution("catsandog", new[] { "cats", "dog", "sand", "and", "cat" });
+            bool example3Memo = solution.SolutionWithMemo("catsandog", new[] { "cats", "dog", "sand", "and", "cat" });
+            Console.WriteLine($"Example 3 - Bottom-up: {example3BottomUp}");
+            Console.WriteLine($"Example 3 - Memoized: {example3Memo}");
             Console.WriteLine("Expected: false\n");
 
-            Console.WriteLine($"Reuse word: {solution.Solution("aaaaaaa", new[] { "aaa", "aaaa" })}");
+            bool reuseMemo = solution.SolutionWithMemo("aaaaaaa", new[] { "aaa", "aaaa" });
+            Console.WriteLine($"Reuse word - Memoized: {reuseMemo}");
             Console.WriteLine("Expected: true\n");
 
-            Console.WriteLine($"Empty string: {solution.Solution("", new[] { "a" })}");
+            bool emptyMemo = solution.SolutionWithMemo("", new[] { "a" });
+            Console.WriteLine($"Empty string - Memoized: {emptyMemo}");
             Console.WriteLine("Expected: true");
         }
     }
