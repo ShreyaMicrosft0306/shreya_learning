@@ -26,9 +26,25 @@ Greedy.
    new candidate start and reset the tank to zero.
 
 WHY THE GREEDY RESET WORKS:
-If starting at start cannot reach station i + 1, every station between start
-and i has even less accumulated gas at the point of failure. Therefore none of
-those stations can be a valid starting point.
+We keep a running balance from the current candidate start. If this balance
+becomes negative at station i, then the route from the current start through i
+has a net deficit. That means every station in that range is part of a bad
+prefix and cannot lead to a valid full circuit, because the tank is already
+below zero before reaching the next station.
+
+So we discard that candidate start and try the next station: start = i + 1.
+This is safe because a negative prefix can never be fixed by continuing later;
+any complete loop that includes that prefix would still be invalid.
+
+Example:
+If currentBalance is -3 at station i, then from the current start to station i,
+the total gas collected is 3 units less than the total cost paid. No later
+station can magically recover that lost gas. Therefore, the only useful new
+candidate is a later start index.
+
+We still keep totalBalance for the final validation. If totalBalance >= 0 after
+scanning the full circle, the final start is valid; otherwise no station can
+complete the circuit.
 
 TIME COMPLEXITY: O(n)
 - One pass to calculate total gas and the candidate start.
@@ -59,8 +75,8 @@ namespace DSA_CSharp.DynamicProgramming
                 return -1;
             }
 
-            int totalBalance = 0;
-            int currentBalance = 0;
+            int totalBalance = 0; // total surplus/deficit across the entire circle
+            int currentBalance = 0; // running surplus from the current candidate start
             int start = 0;
 
             for (int station = 0; station < gas.Length; station++)
@@ -69,6 +85,9 @@ namespace DSA_CSharp.DynamicProgramming
                 totalBalance += balance;
                 currentBalance += balance;
 
+                // If the current candidate start cannot reach the next station,
+                // then every station before this point is a bad prefix. Reset to
+                // the next station and test a later start.
                 if (currentBalance < 0)
                 {
                     start = station + 1;
