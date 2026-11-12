@@ -114,6 +114,56 @@ namespace DSA_CSharp.Graphs
             return parent[x];
         }
 
+        /// <summary>
+        /// Alternate DFS-based solution.
+        /// Builds adjacency list and counts connected components by exploring each
+        /// unvisited node once.
+        /// Time: O(n + e), Space: O(n + e)
+        /// </summary>
+        public int CountComponentsDFS(int n, int[][] edges)
+        {
+            var adjacency = new List<int>[n];
+            for (int i = 0; i < n; i++)
+            {
+                adjacency[i] = new List<int>();
+            }
+
+            foreach (int[] edge in edges)
+            {
+                int u = edge[0];
+                int v = edge[1];
+                adjacency[u].Add(v);
+                adjacency[v].Add(u);
+            }
+
+            bool[] visited = new bool[n];
+            int components = 0;
+
+            for (int node = 0; node < n; node++)
+            {
+                if (!visited[node])
+                {
+                    components++;
+                    DFS(node, adjacency, visited);
+                }
+            }
+
+            return components;
+        }
+
+        private void DFS(int node, List<int>[] adjacency, bool[] visited)
+        {
+            visited[node] = true;
+
+            foreach (int neighbor in adjacency[node])
+            {
+                if (!visited[neighbor])
+                {
+                    DFS(neighbor, adjacency, visited);
+                }
+            }
+        }
+
         public static void Test()
         {
             var solution = new NumberOfConnectedComponents();
@@ -127,7 +177,8 @@ namespace DSA_CSharp.Graphs
                 new[] { 1, 2 },
                 new[] { 3, 4 }
             };
-            Console.WriteLine($"Test 1 Output: {solution.CountComponents(n1, edges1)}");
+            Console.WriteLine($"Test 1 Union-Find: {solution.CountComponents(n1, edges1)}");
+            Console.WriteLine($"Test 1 DFS: {solution.CountComponentsDFS(n1, edges1)}");
             Console.WriteLine("Expected: 2\n");
 
             int n2 = 5;
@@ -138,7 +189,8 @@ namespace DSA_CSharp.Graphs
                 new[] { 2, 3 },
                 new[] { 3, 4 }
             };
-            Console.WriteLine($"Test 2 Output: {solution.CountComponents(n2, edges2)}");
+            Console.WriteLine($"Test 2 Union-Find: {solution.CountComponents(n2, edges2)}");
+            Console.WriteLine($"Test 2 DFS: {solution.CountComponentsDFS(n2, edges2)}");
             Console.WriteLine("Expected: 1\n");
 
             int n3 = 3;
@@ -146,7 +198,8 @@ namespace DSA_CSharp.Graphs
             {
                 new[] { 0, 1 }
             };
-            Console.WriteLine($"Test 3 Output: {solution.CountComponents(n3, edges3)}");
+            Console.WriteLine($"Test 3 Union-Find: {solution.CountComponents(n3, edges3)}");
+            Console.WriteLine($"Test 3 DFS: {solution.CountComponentsDFS(n3, edges3)}");
             Console.WriteLine("Expected: 2");
         }
     }
