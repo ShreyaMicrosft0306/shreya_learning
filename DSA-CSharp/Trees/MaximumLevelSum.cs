@@ -34,11 +34,19 @@ Maximum sum is 7 at level 2
 
 Example 2:
 Input: root = [989,null,10250,98693,-89388,null,null,null,-32127]
+    989
+      \
+     10250
+     /   \
+  98693 -89388
+            \
+           -32127
 Output: 2
 Explanation: Level 2 has the maximum sum
 
 Example 3:
 Input: root = [1]
+    1
 Output: 1
 Explanation: Only one level
 

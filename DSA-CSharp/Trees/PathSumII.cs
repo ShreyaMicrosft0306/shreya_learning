@@ -153,15 +153,15 @@ public class PathSumII
         Console.WriteLine("Example 1: " + Format(Solve(root1, 10)));
         // Expected: [[1,2,7],[1,4,5]]
 
-        // Single node equals target
+        // Example 2:    5
         Console.WriteLine("Example 2: " + Format(Solve(new TreeNode(5), 5)));
         // Expected: [[5]]
 
-        // Single node not equal to target
+        // Example 3:    5
         Console.WriteLine("Example 3: " + Format(Solve(new TreeNode(5), 3)));
         // Expected: []
 
-        // Empty tree
+        // Example 4: (empty tree)
         Console.WriteLine("Example 4: " + Format(Solve(null, 10)));
         // Expected: []
     }

@@ -146,11 +146,13 @@ public class LongestUnivaluePath
         Console.WriteLine("Example 2: " + Solve(root2));
         // Expected: 4
 
-        // Single node
+        // Example 3:    5
         Console.WriteLine("Example 3: " + Solve(new TreeNode(5)));
         // Expected: 0
 
-        // All different values
+        // Example 4:    1
+        //              / \
+        //             2   3
         TreeNode root4 = new(1) { left = new(2), right = new(3) };
         Console.WriteLine("Example 4: " + Solve(root4));
         // Expected: 0

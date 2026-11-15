@@ -147,11 +147,19 @@ public class MaximumWidthBinaryTree
         Console.WriteLine("Example 2: " + Solve(root2));
         // Expected: 2
 
-        // Single node
+        // Example 3:    1
         Console.WriteLine("Example 3: " + Solve(new TreeNode(1)));
         // Expected: 1
 
-        // Example 3 from problem: width 7
+        // Example 4:      4
+        //                / \
+        //               2   7
+        //              /     \
+        //             1       9
+        //            /       / \
+        //           7       6   9
+        //                  / \
+        //                 1   1
         TreeNode root4 = new(4)
         {
             left = new(2)

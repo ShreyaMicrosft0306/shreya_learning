@@ -12,6 +12,12 @@ considered a subtree of itself.
 
 EXAMPLE:
 Input: root = [3,4,5,1,2], subRoot = [4,1,2]
+    root:             subRoot:
+        3                 4
+       / \               / \
+      4   5             1   2
+     / \
+    1   2
 Output: true
 
 APPROACH:

@@ -14,6 +14,9 @@ namespace DSA_CSharp.Trees
     //
     // EXAMPLE:
     // Input: root = [2,1,3]
+    //     2
+    //    / \
+    //   1   3
     // Output: true
     //
     // APPROACH:

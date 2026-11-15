@@ -18,11 +18,17 @@ OUTPUT:
 EXAMPLES:
 Example 1:
 Input: root = [1,2,3,null,null,4,5]
+    1
+   / \
+  2   3
+     / \
+    4   5
 Serialized: "1,2,N,3,4,N,5,N"
 Output: [1,2,3,null,null,4,5]
 
 Example 2:
 Input: root = []
+    (empty tree)
 Serialized: "N"
 Output: []
 

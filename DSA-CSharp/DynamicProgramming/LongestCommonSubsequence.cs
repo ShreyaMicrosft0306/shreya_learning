@@ -17,7 +17,22 @@ namespace DSA_CSharp.DynamicProgramming
     //
     // APPROACH:
     // Dynamic programming over prefixes of the two strings.
-    // dp[i][j] = length of the LCS of text1[0..i-1] and text2[0..j-1].
+    // dp[i, j] = length of the LCS using the first i characters of text1
+    //            and the first j characters of text2.
+    //
+    // The table has an extra row and column for an empty string:
+    //
+    //              text2:  ""  a  c  e
+    // text1: ""            0   0  0  0
+    //        a             0   1  1  1
+    //        b             0   1  1  1
+    //        c             0   1  2  2
+    //        d             0   1  2  2
+    //        e             0   1  2  3
+    //
+    // For example, dp[1, 2] means LCS("a", "ac"), so its value is 1.
+    // The DP index is one ahead of the string index:
+    // text1[i - 1] and text2[j - 1] are the current characters.
     //
     // If the current characters match, we extend the LCS by 1.
     // Otherwise, we either skip the character from text1 or text2.
@@ -44,10 +59,12 @@ namespace DSA_CSharp.DynamicProgramming
                 {
                     if (text1[i - 1] == text2[j - 1])
                     {
+                        // The matching character adds one to the smaller problem.
                         dp[i, j] = dp[i - 1, j - 1] + 1;
                     }
                     else
                     {
+                        // Skip one character and keep the better result.
                         dp[i, j] = Math.Max(dp[i - 1, j], dp[i, j - 1]);
                     }
                 }
