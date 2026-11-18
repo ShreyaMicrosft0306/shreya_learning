@@ -19,6 +19,8 @@ Output: 3
 APPROACH:
 Greedy.
 
+
+
 1. If total gas is less than total cost, completing the circuit is impossible.
 2. Track the current tank while scanning from left to right.
 3. If the tank becomes negative at station i, no station from the current

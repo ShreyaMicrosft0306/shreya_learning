@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 /*
 ============================================================
 PROBLEM: Kth Smallest Element in a Sorted Matrix
@@ -122,6 +124,45 @@ public class KthSmallestElementInSortedMatrix
         return (int)low;
     }
 
+    /// <summary>
+    /// Alternative heap-based approach.
+    /// Works because every row is sorted and the matrix is globally sorted by rows/columns.
+    /// We keep only the next unprocessed value from each row in a min-heap.
+    /// </summary>
+    public static int SolveUsingMinHeap(int[][] matrix, int k)
+    {
+        if (matrix == null || matrix.Length == 0 || matrix[0].Length == 0)
+            throw new ArgumentException("Matrix cannot be empty.");
+
+        int rows = matrix.Length;
+        int cols = matrix[0].Length;
+        var heap = new PriorityQueue<(int row, int col, int value), int>();
+
+        for (int r = 0; r < rows; r++)
+        {
+            heap.Enqueue((r, 0, matrix[r][0]), matrix[r][0]);
+        }
+
+        int count = 0;
+
+        while (heap.Count > 0 && count < k)
+        {
+            var current = heap.Dequeue();
+            count++;
+
+            if (count == k)
+                return current.value;
+
+            if (current.col + 1 < cols)
+            {
+                heap.Enqueue((current.row, current.col + 1, matrix[current.row][current.col + 1]),
+                    matrix[current.row][current.col + 1]);
+            }
+        }
+
+        throw new InvalidOperationException("k is out of range for the given matrix.");
+    }
+
     private static int CountLessThanOrEqualTo(int[][] matrix, long value)
     {
         int n = matrix.Length;
@@ -152,6 +193,18 @@ public class KthSmallestElementInSortedMatrix
         Console.WriteLine(
             "Example 1: " +
             Solve(
+                new[]
+                {
+                    new[] { 1, 5, 9 },
+                    new[] { 10, 11, 13 },
+                    new[] { 12, 13, 15 }
+                },
+                8));
+        // Expected: 13
+
+        Console.WriteLine(
+            "Heap Example 1: " +
+            SolveUsingMinHeap(
                 new[]
                 {
                     new[] { 1, 5, 9 },
