@@ -86,44 +86,57 @@ namespace DSA_CSharp.Strings
     {
         /// <summary>
         /// Returns the longest palindromic substring in s.
-        /// Time: O(n²), Space: O(1)
+        /// Dynamic programming approach: O(n²) time, O(n²) space.
         /// </summary>
         public string LongestPalindrome(string s)
         {
             if (string.IsNullOrEmpty(s))
                 return "";
 
+            int n = s.Length;
+            bool[,] dp = new bool[n, n];
+
             int longestStart = 0;
             int longestLength = 1;
 
-            for (int center = 0; center < s.Length; center++)
+            // Single-character palindromes
+            for (int i = 0; i < n; i++)
             {
-                // Odd-length palindrome, with one character as the center
-                Expand(s, center, center, ref longestStart, ref longestLength);
+                dp[i, i] = true;
+            }
 
-                // Even-length palindrome, with the gap between two characters as the center
-                Expand(s, center, center + 1, ref longestStart, ref longestLength);
+            // Two-character palindromes
+            for (int i = 0; i < n - 1; i++)
+            {
+                if (s[i] == s[i + 1])
+                {
+                    dp[i, i + 1] = true;
+                    longestStart = i;
+                    longestLength = 2;
+                }
+            }
+
+            // Length >= 3
+            for (int length = 3; length <= n; length++)
+            {
+                for (int left = 0; left + length - 1 < n; left++)
+                {
+                    int right = left + length - 1;
+
+                    if (s[left] == s[right] && dp[left + 1, right - 1])
+                    {
+                        dp[left, right] = true;
+
+                        if (length > longestLength)
+                        {
+                            longestStart = left;
+                            longestLength = length;
+                        }
+                    }
+                }
             }
 
             return s.Substring(longestStart, longestLength);
-        }
-
-        private void Expand(string s, int left, int right,
-            ref int longestStart, ref int longestLength)
-        {
-            while (left >= 0 && right < s.Length && s[left] == s[right])
-            {
-                int currentLength = right - left + 1;
-
-                if (currentLength > longestLength)
-                {
-                    longestStart = left;
-                    longestLength = currentLength;
-                }
-
-                left--;
-                right++;
-            }
         }
 
         public static void Test()
